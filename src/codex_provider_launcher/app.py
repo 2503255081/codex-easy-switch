@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from .config import restore_last
 from .diagnostics import logger, log_path, read_logs, redact
 from .launch import launch
-from .platforms import is_desktop_running, windows_runtime
+from .platforms import is_desktop_running, windows_runtime, find_posix_cli
 from .catalog import list_models
 from .profiles import CredentialStore, ProfileStore, data_dir, new_profile, normalize_url
 
@@ -230,7 +230,9 @@ class Launcher(tk.Tk):
         window = self.settings_window
         def worker():
             try:
-                cli = windows_runtime()[1] if os.name == "nt" else Path(shutil.which("codex") or "")
+                cli = windows_runtime()[1] if os.name == "nt" else find_posix_cli()
+                if not cli:
+                    raise RuntimeError("找不到 Codex CLI，请先安装 Codex CLI。")
                 models, _ = list_models(profile, secret, cli)
                 names = [name for name, _ in models]
                 error = None

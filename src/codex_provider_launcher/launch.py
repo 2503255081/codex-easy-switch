@@ -14,7 +14,7 @@ from .adapter import ChatAdapter
 from .diagnostics import logger
 from .catalog import deepseek_catalog, list_models, fetch, verify
 from .config import atomic_write, candidate, commit
-from .platforms import ensure_windows_bridge, is_desktop_running, posix_bridge, windows_runtime
+from .platforms import ensure_windows_bridge, find_posix_cli, is_desktop_running, posix_bridge, windows_runtime
 from .probe import clean_env, validate
 from .profiles import CredentialStore, Profile, data_dir
 
@@ -38,15 +38,16 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
         bridge = ensure_windows_bridge()
         command = [str(desktop)]
     else:
-        cli_name = cli_path.strip() or shutil.which("codex")
-        if not cli_name or not Path(cli_name).is_file():
-            raise RuntimeError("找不到 Codex CLI，请在启动器中选择其路径。")
-        cli = Path(cli_name).resolve()
-        bridge = posix_bridge()
+        desktop = None
         if sys.platform == "darwin":
             desktop = Path(desktop_path.strip() or "/Applications/Codex.app/Contents/MacOS/Codex")
             if not desktop.is_file():
-                raise RuntimeError("找不到 Codex Desktop，请在启动器中选择桌面程序的可执行文件。")
+                raise RuntimeError("找不到 Codex Desktop，请先将 Codex.app 安装到应用程序目录。")
+        cli = Path(cli_path.strip()).resolve() if cli_path.strip() else find_posix_cli(desktop)
+        if not cli or not cli.is_file():
+            raise RuntimeError("找不到 Codex CLI。请先安装 Codex CLI，并确保 codex 位于 PATH 或 ~/.local/bin。")
+        bridge = posix_bridge()
+        if sys.platform == "darwin":
             command = [str(desktop)]
         else:
             terminal = shutil.which("x-terminal-emulator") or shutil.which("xterm")

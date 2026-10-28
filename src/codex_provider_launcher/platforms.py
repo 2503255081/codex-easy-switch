@@ -75,10 +75,32 @@ def posix_bridge() -> Path:
     path = directory / "provider-bridge"
     # Executable shebang permits a path only; quoting in shell handles spaces in Python path.
     import shlex
-    script = "#!/bin/sh\nexec " + shlex.quote(sys.executable) + " -m codex_provider_launcher.bridge \"$@\"\n"
-    path.write_text(script, encoding="utf-8")
+    if getattr(sys, "frozen", False):
+        script = "#!/bin/sh\nexport PYINSTALLER_RESET_ENVIRONMENT=1\nexec " + shlex.quote(sys.executable) + " --bridge \"$@\"\n"
+    else:
+        script = "#!/bin/sh\nexec " + shlex.quote(sys.executable) + " -m codex_provider_launcher.bridge \"$@\"\n"
+    from .config import atomic_write
+    atomic_write(path, script.encode("utf-8"))
     path.chmod(0o700)
     return path
+
+
+def find_posix_cli(desktop: Path | None = None) -> Path | None:
+    """Resolve a CLI when a desktop launcher has Finder's minimal PATH."""
+    if desktop is not None:
+        for candidate in (desktop.parent.parent / "Resources" / "codex",
+                          desktop.parent.parent / "Resources" / "bin" / "codex"):
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return candidate.resolve()
+    name = shutil.which("codex")
+    if name:
+        return Path(name).resolve()
+    for directory in (Path.home() / ".local/bin", Path.home() / ".npm-global/bin",
+                      Path.home() / ".cargo/bin", Path("/opt/homebrew/bin"), Path("/usr/local/bin")):
+        candidate = directory / "codex"
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate.resolve()
+    return None
 
 
 def is_desktop_running() -> bool:
