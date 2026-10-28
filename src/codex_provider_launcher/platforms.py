@@ -85,11 +85,29 @@ def posix_bridge() -> Path:
     return path
 
 
+def find_mac_desktop() -> Path | None:
+    for candidate in (Path("/Applications/Codex.app/Contents/MacOS/Codex"),
+                      Path("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT")):
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def find_linux_desktop() -> Path | None:
+    name = shutil.which("chatgpt")
+    if name and Path(name).is_file() and os.access(name, os.X_OK):
+        return Path(name)
+    return None
+
+
 def find_posix_cli(desktop: Path | None = None) -> Path | None:
     """Resolve a CLI when a desktop launcher has Finder's minimal PATH."""
     if desktop is not None:
-        for candidate in (desktop.parent.parent / "Resources" / "codex",
-                          desktop.parent.parent / "Resources" / "bin" / "codex"):
+        binary = desktop.resolve()
+        for candidate in (binary.parent.parent / "Resources" / "codex",
+                          binary.parent.parent / "Resources" / "bin" / "codex",
+                          binary.parent / "resources" / "codex",
+                          Path("/usr/lib/chatgpt/resources/codex")):
             if candidate.is_file() and os.access(candidate, os.X_OK):
                 return candidate.resolve()
     name = shutil.which("codex")
@@ -113,5 +131,19 @@ def is_desktop_running() -> bool:
         return any("openai.codex_" in line.lower() for line in result.stdout.splitlines())
     if sys.platform == "darwin":
         result = subprocess.run(["ps", "-axo", "comm="], capture_output=True, text=True, timeout=10, check=True)
-        return any("Codex.app/Contents/MacOS/" in line for line in result.stdout.splitlines())
+        return any("Codex.app/Contents/MacOS/" in line or "ChatGPT.app/Contents/MacOS/" in line for line in result.stdout.splitlines())
+    if sys.platform.startswith("linux"):
+        desktop = find_linux_desktop()
+        if not desktop:
+            return False
+        resolved = desktop.resolve()
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                executable = (entry / "exe").resolve(strict=True)
+                if executable == resolved or (str(executable).startswith("/usr/lib/chatgpt/") and executable.name.lower() == "chatgpt"):
+                    return True
+            except (OSError, RuntimeError):
+                continue
     return False

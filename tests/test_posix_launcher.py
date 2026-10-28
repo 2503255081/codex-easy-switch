@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from contextlib import ExitStack
 
 from codex_provider_launcher import platforms
 
@@ -33,3 +34,42 @@ class PosixLauncherTests(unittest.TestCase):
             binary.chmod(0o700)
             with patch.object(Path, "home", return_value=root), patch.object(platforms.shutil, "which", return_value=None):
                 self.assertEqual(platforms.find_posix_cli(), binary.resolve())
+
+    def test_official_desktop_bundle_cli_is_preferred(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            desktop = root / "chatgpt"
+            cli = root / "resources" / "codex"
+            cli.parent.mkdir()
+            desktop.write_text("#!/bin/sh\n")
+            cli.write_text("#!/bin/sh\n")
+            desktop.chmod(0o700)
+            cli.chmod(0o700)
+            self.assertEqual(platforms.find_posix_cli(desktop), cli.resolve())
+
+    def test_linux_desktop_receives_bridge_and_key(self):
+        from codex_provider_launcher import launch
+        from codex_provider_launcher.profiles import new_profile
+        with tempfile.TemporaryDirectory() as d, ExitStack() as stack:
+            root = Path(d)
+            cli = root / "codex"
+            desktop = root / "chatgpt"
+            cli.touch()
+            desktop.touch()
+            home = root / "codex-home"
+            home.mkdir()
+            (home / "config.toml").write_text('model="personal-model"\n')
+            profile = new_profile("test", "responses", "https://example.com/v1", "auto")
+            stack.enter_context(patch.dict(os.environ, {"CODEX_HOME": str(home)}))
+            stack.enter_context(patch.object(sys, "platform", "linux"))
+            for name, value in {"is_desktop_running": False, "find_linux_desktop": desktop,
+                                "find_posix_cli": cli, "posix_bridge": root / "bridge",
+                                "data_dir": root / "data", "validate": {},
+                                "list_models": ([("sample-model", {})], False)}.items():
+                stack.enter_context(patch.object(launch, name, return_value=value))
+            stack.enter_context(patch.object(launch.CredentialStore, "get", return_value="fixture-key"))
+            popen = stack.enter_context(patch.object(launch.subprocess, "Popen"))
+            launch.launch(profile, "", "", "")
+            self.assertEqual(popen.call_args.args[0], [str(desktop)])
+            self.assertEqual(popen.call_args.kwargs["env"]["CODEX_CLI_PATH"], str(root / "bridge"))
+            self.assertEqual(popen.call_args.kwargs["env"]["CODEX_LAUNCHER_API_KEY"], "fixture-key")

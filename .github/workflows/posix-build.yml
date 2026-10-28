@@ -4,6 +4,22 @@ on:
   push:
     branches: [portable-posix-build]
 jobs:
+  official-linux-package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install .
+      - name: Inspect official desktop bundle and validate its Codex CLI
+        shell: bash
+        run: |
+          curl -fL --retry 2 --max-time 300 -o "$RUNNER_TEMP/chatgpt.deb" https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_amd64.deb
+          dpkg-deb --fsys-tarfile "$RUNNER_TEMP/chatgpt.deb" | tar -x -C "$RUNNER_TEMP" ./usr/lib/chatgpt/resources/codex ./usr/share/applications/chatgpt.desktop
+          grep '^Exec=' "$RUNNER_TEMP/usr/share/applications/chatgpt.desktop"
+          "$RUNNER_TEMP/usr/lib/chatgpt/resources/codex" --version
+          python -c 'import os; from pathlib import Path; from codex_provider_launcher.probe import validate; p=Path(os.environ["RUNNER_TEMP"])/"usr/lib/chatgpt/resources/codex"; r=validate(p,b"",timeout=45); print("official bundled CLI model count:",len(r[3]["data"]))'
   build:
     strategy:
       fail-fast: false

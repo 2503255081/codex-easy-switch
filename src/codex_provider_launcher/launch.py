@@ -14,7 +14,7 @@ from .adapter import ChatAdapter
 from .diagnostics import logger
 from .catalog import deepseek_catalog, list_models, fetch, verify
 from .config import atomic_write, candidate, commit
-from .platforms import ensure_windows_bridge, find_posix_cli, is_desktop_running, posix_bridge, windows_runtime
+from .platforms import ensure_windows_bridge, find_linux_desktop, find_mac_desktop, find_posix_cli, is_desktop_running, posix_bridge, windows_runtime
 from .probe import clean_env, validate
 from .profiles import CredentialStore, Profile, data_dir
 
@@ -40,14 +40,16 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
     else:
         desktop = None
         if sys.platform == "darwin":
-            desktop = Path(desktop_path.strip() or "/Applications/Codex.app/Contents/MacOS/Codex")
-            if not desktop.is_file():
-                raise RuntimeError("找不到 Codex Desktop，请先将 Codex.app 安装到应用程序目录。")
+            desktop = Path(desktop_path.strip()) if desktop_path.strip() else find_mac_desktop()
+            if not desktop or not desktop.is_file():
+                raise RuntimeError("找不到 Codex Desktop，请先将 Codex.app 或 ChatGPT.app 安装到应用程序目录。")
+        elif sys.platform.startswith("linux"):
+            desktop = find_linux_desktop()
         cli = Path(cli_path.strip()).resolve() if cli_path.strip() else find_posix_cli(desktop)
         if not cli or not cli.is_file():
             raise RuntimeError("找不到 Codex CLI。请先安装 Codex CLI，并确保 codex 位于 PATH 或 ~/.local/bin。")
         bridge = posix_bridge()
-        if sys.platform == "darwin":
+        if desktop:
             command = [str(desktop)]
         else:
             terminal = shutil.which("x-terminal-emulator") or shutil.which("xterm")

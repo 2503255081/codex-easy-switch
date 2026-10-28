@@ -4,7 +4,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import threading
-import shutil
+import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from .config import restore_last
 from .diagnostics import logger, log_path, read_logs, redact
 from .launch import launch
-from .platforms import is_desktop_running, windows_runtime, find_posix_cli
+from .platforms import is_desktop_running, windows_runtime, find_posix_cli, find_linux_desktop, find_mac_desktop
 from .catalog import list_models
 from .profiles import CredentialStore, ProfileStore, data_dir, new_profile, normalize_url
 
@@ -230,7 +230,8 @@ class Launcher(tk.Tk):
         window = self.settings_window
         def worker():
             try:
-                cli = windows_runtime()[1] if os.name == "nt" else find_posix_cli()
+                desktop = find_mac_desktop() if sys.platform == "darwin" else (find_linux_desktop() if sys.platform.startswith("linux") else None)
+                cli = windows_runtime()[1] if os.name == "nt" else find_posix_cli(desktop)
                 if not cli:
                     raise RuntimeError("找不到 Codex CLI，请先安装 Codex CLI。")
                 models, _ = list_models(profile, secret, cli)
