@@ -11,11 +11,19 @@ from pathlib import Path
 from .profiles import data_dir
 
 
+def system_powershell() -> str:
+    """Use native PowerShell even from the x86 launcher on x64 Windows."""
+    windows = Path(os.environ.get("WINDIR", "C:/Windows"))
+    native = windows / "Sysnative" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    standard = windows / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    return str(native if native.is_file() else standard)
+
+
 def windows_runtime() -> tuple[Path, Path]:
     if os.name != "nt":
         raise RuntimeError("此操作只适用于 Windows。")
     query = "(Get-AppxPackage -Name OpenAI.Codex | Sort-Object Version -Descending | Select-Object -First 1).InstallLocation"
-    result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", query],
+    result = subprocess.run([system_powershell(), "-NoProfile", "-NonInteractive", "-Command", query],
                             capture_output=True, text=True, timeout=20, creationflags=subprocess.CREATE_NO_WINDOW)
     if result.returncode or not result.stdout.strip():
         raise RuntimeError("找不到 Codex Desktop 安装包。")
@@ -35,6 +43,16 @@ def windows_runtime() -> tuple[Path, Path]:
 def ensure_windows_bridge() -> Path:
     if os.name != "nt":
         raise RuntimeError("Windows bridge is unavailable on this system")
+    bundled = Path(__file__).resolve().parent / "ProviderBridge.exe"
+    if getattr(sys, "frozen", False) and bundled.is_file():
+        # Persist outside the one-file extraction folder: Codex outlives the launcher.
+        from .config import atomic_write
+        raw = bundled.read_bytes()
+        directory = data_dir() / "runtime"
+        result = directory / ("bridge-" + hashlib.sha256(raw).hexdigest()[:16] + ".exe")
+        if not result.exists() or result.read_bytes() != raw:
+            atomic_write(result, raw)
+        return result
     source = Path(__file__).resolve().parent / "ProviderBridge.cs"
     compiler = Path(os.environ["WINDIR"]) / "Microsoft.NET" / "Framework64" / "v4.0.30319" / "csc.exe"
     if not source.is_file() or not compiler.is_file():
@@ -66,7 +84,7 @@ def posix_bridge() -> Path:
 def is_desktop_running() -> bool:
     if os.name == "nt":
         query = "Get-CimInstance Win32_Process -Filter \"Name='ChatGPT.exe'\" | ForEach-Object { $_.ExecutablePath }"
-        result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", query],
+        result = subprocess.run([system_powershell(), "-NoProfile", "-NonInteractive", "-Command", query],
                                 capture_output=True, text=True, timeout=20, creationflags=subprocess.CREATE_NO_WINDOW)
         if result.returncode:
             raise RuntimeError("无法确认 Codex 是否已经运行；为保护配置已停止。")

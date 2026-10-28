@@ -2,6 +2,19 @@
 
 一个跨平台的本地 Codex 启动器，供用户在个人账号和自定义 API 服务之间切换。服务地址、模型和密钥由使用者自行提供，项目不包含预设中转站或账号。
 
+## Windows 下载（免安装 Python）
+
+下载后双击运行，先在电脑上安装并正常运行一次 Codex Desktop。选择中转站时只需配置自己的 API 地址和密钥；个人账号直接启动。
+
+| 版本 | 下载 |
+| --- | --- |
+| x64，Intel / AMD 64 位电脑（推荐） | [下载 Windows x64 EXE](https://github.com/2503255081/codex-provider-launcher/releases/latest/download/Codex-Provider-Launcher-Windows-x64.exe) |
+| x86，32 位启动器 | [下载 Windows x86 EXE](https://github.com/2503255081/codex-provider-launcher/releases/latest/download/Codex-Provider-Launcher-Windows-x86.exe) |
+
+[全部版本、发布说明及 SHA256 校验文件](https://github.com/2503255081/codex-provider-launcher/releases)。这两个版本面向 Windows 10/11，内含 Python 和图形组件，不用执行安装命令。x86 启动器已在 64 位 Windows 的兼容环境中验证；它不会让官方 Codex Desktop 支持原本不支持的 32 位操作系统。EXE 尚未购买代码签名证书，Windows 可能显示未知发布者。
+
+EXE 提供个人账号、中转站 Responses API、DeepSeek 原生 API 三个入口；普通 Chat Completions 的可选 LiteLLM 适配器不包含在便携包内。密钥由每位使用者保存在自己的 Windows 凭据管理器中，发行包不含开发者的密钥、域名或配置。
+
 **目前是实验版本。** Windows 图形界面、隔离配置校验和模拟协议转换已测试；Linux 在 WSL 中通过核心测试；DeepSeek 原生 Responses 的流式和同名命名空间工具调用已实测；macOS 桌面启动和完整的桌面切换尚未验证。请先备份配置和聊天数据，不要把它用于无法中断的工作。
 
 ## 适用场景：个人额度用完后继续工作
@@ -28,6 +41,8 @@
 - 遇到不认识的旧 profile、provider 或自定义目录时停止；对于旧模型目录，可显式勾选隔离。不是所有 CCSwitch 配置都能自动修复。
 
 ## 使用
+
+Windows 普通用户可直接使用上方 EXE 下载。以下是源码运行方式，适用于开发、Linux/macOS 或需要可选 LiteLLM 适配器的用户。
 
 安装 Python 3.10 或更新版本、带 Tk 的 Python、Codex CLI 和对应平台的 Codex。Linux 还需要图形桌面、终端模拟器和已解锁的 Secret Service。macOS 需要钥匙串。Windows 的桌面入口目前面向 Microsoft Store 安装的 Codex。
 
@@ -62,3 +77,7 @@ python -m unittest discover -s tests -v
 ```
 
 本项目独立开发，与 OpenAI、DeepSeek、OpenCodex 和 LiteLLM 没有官方隶属关系。
+
+## 从源码打包 Windows EXE
+
+分别使用 32 位或 64 位 Python 3.13 环境运行 `python -m pip install . -r packaging/requirements.txt`，再运行 `python packaging/build_windows.py`。程序会按当前 Python 的位数生成 x86 或 x64 EXE 和 SHA256 校验文件到 `dist/`。编译桥接程序需要 Windows 自带的 .NET Framework 4 编译器；成品已包含桥接程序。也可以在 GitHub Actions 中手动运行 `Windows portable EXE` 工作流构建两个版本。
