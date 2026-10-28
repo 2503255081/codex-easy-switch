@@ -42,6 +42,7 @@ class Profile:
     model: str
     allow_http: bool = False
     codex_catalog: bool = False
+    reasoning_effort: str = ""
 
     def validate(self) -> None:
         uuid.UUID(self.id)
@@ -51,6 +52,8 @@ class Profile:
         if not self.model.strip() or any(c.isspace() for c in self.model) or len(self.model) > 200:
             raise ValueError("请输入有效的模型 ID。")
         self.model = self.model.strip()
+        if self.reasoning_effort not in ("", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"):
+            raise ValueError("推理深度无效。")
 
 
 class ProfileStore:

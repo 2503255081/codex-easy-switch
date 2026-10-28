@@ -42,6 +42,7 @@ class LaunchTests(unittest.TestCase):
                  patch.object(launch, "ensure_windows_bridge", return_value=root / "bridge.exe"), \
                  patch.object(launch, "data_dir", return_value=data), \
                  patch.object(launch, "validate"), \
+                 patch.object(launch, "list_models", return_value=([("relay-model", {})], False)), \
                  patch.object(launch.CredentialStore, "get", return_value="fixture-only-key"), \
                  patch.object(launch.subprocess, "Popen", side_effect=fake_popen):
                 launch.launch(profile, "", "", "")
@@ -81,3 +82,28 @@ class LaunchTests(unittest.TestCase):
             self.assertEqual(provider["wire_api"], "responses")
             self.assertEqual(popen.call_args.kwargs["env"]["CODEX_LAUNCHER_API_KEY"], "fixture-key")
             self.assertEqual(popen.call_args.kwargs["env"]["CODEX_SWITCH_FIXED_MODEL"], "deepseek-flash")
+
+    def test_relay_remembers_only_available_last_model(self):
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as d, ExitStack() as stack:
+            root = Path(d)
+            (root / "config.toml").write_text('model="personal-model"\nmodel_reasoning_effort="low"\n')
+            profile = new_profile("relay", "responses", "https://example.com/v1", "last")
+            profile.reasoning_effort = "high"
+            saved = root / "data" / "last-models" / (profile.id + ".txt")
+            saved.parent.mkdir(parents=True)
+            saved.write_text("model-b", encoding="utf-8")
+            stack.enter_context(patch.dict(os.environ, {"CODEX_HOME": str(root)}))
+            for name, value in {"is_desktop_running": False, "windows_runtime": (root / "app", root / "cli"),
+                                "ensure_windows_bridge": root / "bridge", "data_dir": root / "data", "validate": {}}.items():
+                stack.enter_context(patch.object(launch, name, return_value=value))
+            stack.enter_context(patch.object(launch.CredentialStore, "get", return_value="fixture-key"))
+            stack.enter_context(patch.object(launch, "list_models", return_value=([("model-a", {"is_default": True}), ("model-b", {})], False)))
+            popen = stack.enter_context(patch.object(launch.subprocess, "Popen"))
+            launch.launch(profile, "", "", "")
+            config = tomlkit.parse((root / "config.toml").read_text())
+            self.assertEqual((config["model"], config["model_reasoning_effort"]), ("model-b", "high"))
+            self.assertEqual(popen.call_args.kwargs["env"]["CODEX_SWITCH_LAST_MODEL_FILE"], str(saved))
+            launch.launch(None, "", "", "")
+            config = tomlkit.parse((root / "config.toml").read_text())
+            self.assertEqual((config["model"], config["model_reasoning_effort"]), ("personal-model", "low"))

@@ -49,6 +49,8 @@ def candidate(original: bytes, profile: Profile | None, personal_model: str | No
             raise ValueError("此配置必须先启动协议适配器。")
         doc["model_provider"] = PROVIDER
         doc["model"] = profile.model
+        if profile.reasoning_effort:
+            doc["model_reasoning_effort"] = profile.reasoning_effort
         if "model_providers" not in doc:
             doc["model_providers"] = tomlkit.table()
         entry = tomlkit.table()

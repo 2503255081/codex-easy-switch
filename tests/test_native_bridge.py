@@ -24,14 +24,17 @@ class NativeBridgeTests(unittest.TestCase):
                 bridge = ensure_windows_bridge()
             env = os.environ.copy()
             env.update(CODEX_SWITCH_REAL_CLI=str(target), CODEX_SWITCH_PROVIDER="launcher_custom")
+            last = root / "last-model.txt"
+            env["CODEX_SWITCH_LAST_MODEL_FILE"] = str(last)
             env.pop("CODEX_SWITCH_LOG", None)
-            line = {"id": 1, "method": "thread/resume", "params": {"threadId": "fixture", "modelProvider": "old"}}
+            line = {"id": 1, "method": "thread/resume", "params": {"threadId": "fixture", "modelProvider": "old", "model": "model-a"}}
             result = subprocess.run([str(bridge), "app-server"], input=json.dumps(line) + "\n", text=True,
                                     capture_output=True, timeout=20, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
             self.assertEqual(result.returncode, 0, result.stderr)
             message = json.loads(result.stdout)
             self.assertEqual(message["params"]["threadId"], "fixture")
             self.assertEqual(message["params"]["modelProvider"], "launcher_custom")
+            self.assertEqual(last.read_text(encoding="utf-8"), "model-a")
 
     def test_resume_and_turn_fixed_model(self):
         with tempfile.TemporaryDirectory() as d:

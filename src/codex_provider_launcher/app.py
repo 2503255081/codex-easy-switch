@@ -4,6 +4,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import threading
+import shutil
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -13,7 +14,8 @@ from urllib.parse import urlsplit
 from .config import restore_last
 from .diagnostics import logger, log_path, read_logs, redact
 from .launch import launch
-from .platforms import is_desktop_running
+from .platforms import is_desktop_running, windows_runtime
+from .catalog import list_models
 from .profiles import CredentialStore, ProfileStore, data_dir, new_profile, normalize_url
 
 
@@ -31,6 +33,9 @@ class Launcher(tk.Tk):
         self.mode = tk.StringVar(value="relay")
         self.url = tk.StringVar()
         self.key = tk.StringVar()
+        self.model_choice = tk.StringVar(value="自动（服务推荐）")
+        self.effort_choice = tk.StringVar(value="跟随当前设置")
+        self.connection_status = tk.StringVar()
         self.status = tk.StringVar(value="请选择一种方式启动 Codex。")
         self.settings_window = None
         self.active_profile = None
@@ -104,8 +109,8 @@ class Launcher(tk.Tk):
         window = tk.Toplevel(self)
         self.settings_window = window
         window.title("设置")
-        window.geometry("500x310")
-        window.minsize(460, 290)
+        window.geometry("560x510")
+        window.minsize(500, 470)
         window.transient(self)
         frame = ttk.Frame(window, padding=18)
         frame.pack(fill="both", expand=True)
@@ -120,8 +125,21 @@ class Launcher(tk.Tk):
         self.url_label = ttk.Label(self.form, text="中转站链接")
         self.url_entry = ttk.Entry(self.form, textvariable=self.url)
         self.key_label = ttk.Label(self.form, text="API 密钥")
-        self.key_entry = ttk.Entry(self.form, textvariable=self.key, show="•")
+        self.key_frame = ttk.Frame(self.form)
+        self.key_frame.columnconfigure(0, weight=1)
+        self.key_entry = ttk.Entry(self.key_frame, textvariable=self.key, show="•")
+        self.key_entry.grid(row=0, column=0, sticky="ew")
+        self.key_button = ttk.Button(self.key_frame, text="修改", command=self.edit_key)
+        self.key_button.grid(row=0, column=1, padx=(6, 0))
         self.hint = ttk.Label(self.form, wraplength=420)
+        self.test_button = ttk.Button(self.form, text="测试连接并获取模型", command=self.test_connection)
+        self.test_status = ttk.Label(self.form, textvariable=self.connection_status, wraplength=420)
+        self.model_label = ttk.Label(self.form, text="启动默认模型")
+        self.model_entry = ttk.Combobox(self.form, textvariable=self.model_choice, values=("自动（服务推荐）", "上次使用（无记录时自动）"))
+        self.model_entry.bind("<<ComboboxSelected>>", lambda _event: self.update_efforts())
+        self.model_details = {}
+        self.effort_label = ttk.Label(self.form, text="默认推理深度")
+        self.effort_entry = ttk.Combobox(self.form, textvariable=self.effort_choice, state="readonly", values=("跟随当前设置", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"))
         ttk.Button(frame, text="保存设置", command=self.save_settings).pack(fill="x", pady=(12, 0))
         ttk.Button(frame, text="恢复上一次切换前的配置", command=self.restore).pack(fill="x", pady=(7, 0))
         self.select_mode()
@@ -143,44 +161,123 @@ class Launcher(tk.Tk):
         return next((p for p in reversed(self.profiles) if p.kind == kind), None)
 
     def select_mode(self):
-        for widget in (self.url_label, self.url_entry, self.key_label, self.key_entry, self.hint):
+        for widget in (self.url_label, self.url_entry, self.key_label, self.key_frame, self.hint, self.test_button, self.test_status, self.model_label, self.model_entry, self.effort_label, self.effort_entry):
             widget.grid_forget()
         self.key.set("")
         mode = self.mode.get()
         prior = self.existing(mode)
+        self.connection_status.set("")
+        saved_key = bool(prior and self.vault.get(prior.id))
+        self.key_editing = not saved_key
+        self.key.set("已保存的密钥" if saved_key else "")
+        self.key_entry.configure(state="readonly" if saved_key else "normal")
+        self.key_button.configure(state="normal" if saved_key else "disabled")
         if mode == "relay":
             self.url.set(prior.base_url if prior else "")
             self.url_label.grid(row=0, column=0, sticky="w", padx=(0, 12), pady=5)
             self.url_entry.grid(row=0, column=1, sticky="ew", pady=5)
         self.key_label.grid(row=1, column=0, sticky="w", padx=(0, 12), pady=5)
-        self.key_entry.grid(row=1, column=1, sticky="ew", pady=5)
-        self.hint.configure(text="密钥已保存，留空可继续使用。" if prior else "密钥保存在本机系统凭据库。")
+        self.key_frame.grid(row=1, column=1, sticky="ew", pady=5)
+        self.hint.configure(text="密钥已保存在系统凭据库。" if saved_key else "密钥保存在本机系统凭据库。")
         self.hint.grid(row=2, column=1, sticky="w", pady=(2, 0))
+        if mode == "relay":
+            selected = prior.model if prior else "auto"
+            self.model_choice.set({"auto": "自动（服务推荐）", "last": "上次使用（无记录时自动）"}.get(selected, selected))
+            self.effort_choice.set(prior.reasoning_effort if prior and prior.reasoning_effort else "跟随当前设置")
+            self.test_button.grid(row=3, column=1, sticky="w", pady=(8, 0))
+            self.test_status.grid(row=4, column=1, sticky="w")
+            self.model_label.grid(row=5, column=0, sticky="w", pady=5)
+            self.model_entry.grid(row=5, column=1, sticky="ew", pady=5)
+            self.effort_label.grid(row=6, column=0, sticky="w", pady=5)
+            self.effort_entry.grid(row=6, column=1, sticky="ew", pady=5)
+
+    def edit_key(self):
+        self.key_editing = True
+        self.key_entry.configure(state="normal")
+        self.key.set("")
+        self.key_entry.focus_set()
+
+    def connection_details(self):
+        prior = self.existing(self.mode.get())
+        url = self.url.get().strip() if self.mode.get() == "relay" else "https://api.deepseek.com"
+        parsed = urlsplit(url)
+        allow_http = False
+        if parsed.scheme == "http" and parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
+            allow_http = bool(prior and prior.base_url == url and prior.allow_http)
+            if not allow_http:
+                allow_http = messagebox.askyesno("确认 HTTP 连接", "这个地址使用 HTTP，密钥会在网络中明文传输。仍要使用吗？", parent=self.settings_window)
+                if not allow_http:
+                    raise ValueError("已取消 HTTP 连接。")
+        url = normalize_url(url, allow_http)
+        secret = self.key.get().strip() if getattr(self, "key_editing", True) else ""
+        if prior and prior.base_url != url and not secret:
+            raise ValueError("服务地址已改变，请点击修改并重新填写对应的密钥。")
+        if not secret and prior and not getattr(self, "key_editing", True):
+            secret = self.vault.get(prior.id) or ""
+        if not secret:
+            raise ValueError("请填写 API 密钥。")
+        return url, secret, allow_http
+
+    def test_connection(self):
+        try:
+            url, secret, allow_http = self.connection_details()
+            profile = new_profile("中转站", "responses", url, "auto", allow_http)
+        except Exception as exc:
+            messagebox.showerror("连接测试失败", str(exc), parent=self.settings_window)
+            return
+        self.test_button.configure(state="disabled")
+        self.connection_status.set("正在连接并读取模型列表……")
+        window = self.settings_window
+        def worker():
+            try:
+                cli = windows_runtime()[1] if os.name == "nt" else Path(shutil.which("codex") or "")
+                models, _ = list_models(profile, secret, cli)
+                names = [name for name, _ in models]
+                error = None
+            except Exception as exc:
+                names, error = [], redact(str(exc))
+            def done():
+                if not window.winfo_exists():
+                    return
+                self.test_button.configure(state="normal")
+                if self.mode.get() != "relay" or self.url.get().strip().rstrip("/") != url:
+                    self.connection_status.set("设置已更改，请重新测试。")
+                    return
+                if error:
+                    self.connection_status.set("连接失败：" + error)
+                else:
+                    self.model_details = dict(models)
+                    self.model_entry.configure(values=("自动（服务推荐）", "上次使用（无记录时自动）", *names))
+                    self.update_efforts()
+                    self.connection_status.set(f"连接成功，读取到 {len(names)} 个可用模型。此测试不发送对话请求。")
+            self.after(0, done)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def update_efforts(self):
+        details = self.model_details.get(self.model_choice.get(), {})
+        levels = details.get("supported_reasoning_levels") or details.get("supportedReasoningEfforts") or []
+        allowed = ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
+        available = [e.get("effort") or e.get("reasoningEffort") for e in levels if isinstance(e, dict)]
+        choices = [e for e in allowed if not available or e in available]
+        self.effort_entry.configure(values=("跟随当前设置", *choices))
+        if self.effort_choice.get() not in ("跟随当前设置", *choices):
+            self.effort_choice.set("跟随当前设置")
 
     def prepare_profile(self):
         mode = self.mode.get()
         if mode == "personal":
             return None
         prior = self.existing(mode)
-        url = self.url.get().strip() if mode == "relay" else "https://api.deepseek.com"
-        # Explicit acknowledgement is needed before sending an API key over LAN HTTP.
-        allow_http = False
-        parsed = urlsplit(url)
-        if parsed.scheme == "http" and parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
-            allow_http = messagebox.askyesno("确认 HTTP 连接", "这个地址使用 HTTP，密钥会在网络中明文传输。仍要使用吗？")
-            if not allow_http:
-                raise ValueError("已取消 HTTP 连接。")
-        url = normalize_url(url, allow_http)
-        secret = self.key.get().strip()
-        if prior and prior.base_url != url and not secret:
-            raise ValueError("服务地址已改变，请重新填写对应的密钥。")
-        if not secret and prior:
-            secret = self.vault.get(prior.id) or ""
-        if not secret:
-            raise ValueError("请填写 API 密钥。")
+        url, secret, allow_http = Launcher.connection_details(self)
+        selected = self.model_choice.get().strip() if mode == "relay" else "deepseek-flash"
+        selected = {"自动（服务推荐）": "auto", "上次使用（无记录时自动）": "last"}.get(selected, selected)
         profile = new_profile("中转站" if mode == "relay" else "DeepSeek",
                               "responses" if mode == "relay" else "deepseek", url,
-                              "auto" if mode == "relay" else "deepseek-flash", allow_http)
+                              selected, allow_http)
+        if mode == "relay":
+            effort = self.effort_choice.get()
+            profile.reasoning_effort = "" if effort == "跟随当前设置" else effort
+            profile.validate()
         if prior:
             profile.id = prior.id
         self.vault.put(profile.id, secret)
@@ -201,8 +298,8 @@ class Launcher(tk.Tk):
                     self.status.set("请先填写并保存" + ("中转站" if mode == "relay" else "DeepSeek") + "设置。")
                     self.open_settings(mode)
                     return
-                profile = dataclasses.replace(profile, model="auto" if mode == "relay" else "deepseek-flash",
-                                               codex_catalog=False)
+                if mode == "deepseek":
+                    profile = dataclasses.replace(profile, model="deepseek-flash", codex_catalog=False)
         except Exception as exc:
             logger().error("launch preparation failed: %s", exc)
             messagebox.showerror("无法启动", str(exc))

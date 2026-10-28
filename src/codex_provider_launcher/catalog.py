@@ -52,8 +52,8 @@ def deepseek_catalog() -> tuple[Path, list[dict]]:
     return path, models
 
 
-def discover(profile: Profile, key: str, cli: Path, preferred: str = "") -> tuple[str, bool]:
-    """Find an enabled model without asking the user for a model ID."""
+def list_models(profile: Profile, key: str, cli: Path) -> tuple[list[tuple[str, dict]], bool]:
+    """Read visible models without sending an inference request."""
     version = subprocess.run([str(cli), "--version"], capture_output=True, text=True, timeout=10,
                              env=clean_env(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     match = re.match(r"^codex-cli\s+(\S+)", version.stdout.strip())
@@ -88,6 +88,11 @@ def discover(profile: Profile, key: str, cli: Path, preferred: str = "") -> tupl
     candidates = [(name, item) for name, item in candidates if not (name.endswith("--fast") and name[:-6] in ids)]
     if not candidates:
         raise ValueError("中转站没有可用的可见模型，配置未修改。")
+    return candidates, native
+
+
+def discover(profile: Profile, key: str, cli: Path, preferred: str = "") -> tuple[str, bool]:
+    candidates, native = list_models(profile, key, cli)
     if preferred and any(name == preferred for name, _ in candidates):
         return preferred, native
     for name, item in candidates:
@@ -103,7 +108,7 @@ def fetch(profile: Profile, key: str, cli: Path) -> tuple[Path, list[dict]]:
     if version.returncode or not match:
         raise RuntimeError("无法读取当前 Codex CLI 版本，模型列表未更改。")
     url = profile.base_url + "/models?" + urllib.parse.urlencode({"client_version": match.group(1)})
-    req = urllib.request.Request(url, headers={"x-opencodex-api-key": key, "Accept": "application/json"})
+    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + key, "x-opencodex-api-key": key, "Accept": "application/json"})
     with urllib.request.build_opener(NoRedirect()).open(req, timeout=20) as response:
         raw = response.read(4 * 1024 * 1024 + 1)
     if len(raw) > 4 * 1024 * 1024:

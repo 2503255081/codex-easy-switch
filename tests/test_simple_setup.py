@@ -30,7 +30,8 @@ class Store:
 class SimpleSetupTests(unittest.TestCase):
     def setup(self, mode, url="", key="", profiles=None, vault=None):
         obj = SimpleNamespace(mode=Variable(mode), url=Variable(url), key=Variable(key),
-                              profiles=profiles or [], store=Store(), vault=vault or Vault())
+                              model_choice=Variable("自动（服务推荐）"), effort_choice=Variable("跟随当前设置"),
+                              key_editing=True, profiles=profiles or [], store=Store(), vault=vault or Vault())
         obj.existing = lambda choice: next((p for p in reversed(obj.profiles)
                             if p.kind == ("responses" if choice == "relay" else "deepseek")), None)
         return obj
@@ -55,7 +56,23 @@ class SimpleSetupTests(unittest.TestCase):
         profile = Launcher.prepare_profile(obj)
         self.assertEqual(profile.base_url, "https://api.deepseek.com")
         self.assertEqual(profile.model, "deepseek-flash")
+        obj.key_editing = False
         self.assertEqual(Launcher.prepare_profile(obj).id, profile.id)
+
+    def test_masked_saved_key_and_relay_defaults(self):
+        obj = self.setup("relay", "https://example.com/v1", "fixture-key")
+        first = Launcher.prepare_profile(obj)
+        obj.key_editing = False
+        obj.key.set("已保存的密钥")
+        obj.model_choice.set("上次使用（无记录时自动）")
+        obj.effort_choice.set("high")
+        saved = Launcher.prepare_profile(obj)
+        self.assertEqual((saved.id, saved.model, saved.reasoning_effort), (first.id, "last", "high"))
+        self.assertEqual(obj.vault.get(first.id), "fixture-key")
+        obj.key_editing = True
+        obj.key.set("replacement-key")
+        Launcher.prepare_profile(obj)
+        self.assertEqual(obj.vault.get(first.id), "replacement-key")
 
     def test_main_buttons_launch_or_open_settings(self):
         obj = self.setup("relay", "https://example.com/v1", "fixture-key")

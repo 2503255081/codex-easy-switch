@@ -12,7 +12,7 @@ import tomlkit
 
 from .adapter import ChatAdapter
 from .diagnostics import logger
-from .catalog import deepseek_catalog, discover, fetch, verify
+from .catalog import deepseek_catalog, list_models, fetch, verify
 from .config import atomic_write, candidate, commit
 from .platforms import ensure_windows_bridge, is_desktop_running, posix_bridge, windows_runtime
 from .probe import clean_env, validate
@@ -60,7 +60,7 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
     root = tomlkit.parse((original or b"").decode("utf-8-sig"))
     state_path = data_dir() / "personal-model.json"
     if profile and root.get("model_provider", "openai") == "openai" and isinstance(root.get("model"), str):
-        atomic_write(state_path, json.dumps({"model": str(root["model"])}).encode("utf-8"))
+        atomic_write(state_path, json.dumps({"model": str(root["model"]), "reasoning_present": "model_reasoning_effort" in root, "reasoning": str(root.get("model_reasoning_effort", ""))}).encode("utf-8"))
     if profile is None and not personal_model.strip() and state_path.exists():
         state = json.loads(state_path.read_text(encoding="utf-8"))
         personal_model = state.get("model", "") if isinstance(state.get("model", ""), str) else ""
@@ -74,9 +74,26 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
     secret = CredentialStore().get(profile.id) if profile else None
     if profile and not secret:
         raise RuntimeError("未找到服务密钥，请先保存到系统凭据库。")
-    if profile and profile.kind == "responses" and profile.model == "auto":
-        preferred = str(root.get("model", ""))
-        selected, native = discover(profile, secret, cli, preferred)
+    if profile and profile.kind == "responses":
+        candidates, native = list_models(profile, secret, cli)
+        ids = {name for name, _ in candidates}
+        selected = profile.model
+        if selected == "last":
+            try:
+                selected = (data_dir() / "last-models" / (profile.id + ".txt")).read_text(encoding="utf-8").strip()
+            except OSError:
+                selected = "auto"
+            if selected not in ids:
+                selected = "auto"
+        if selected == "auto":
+            selected = next((name for name, item in candidates if item.get("is_default") or item.get("isDefault")), candidates[0][0])
+        if selected not in ids:
+            raise ValueError("所选中转站模型不可用，请在设置中测试连接并重新选择。")
+        details = next(item for name, item in candidates if name == selected)
+        levels = details.get("supported_reasoning_levels") or details.get("supportedReasoningEfforts") or []
+        supported = {entry.get("effort") or entry.get("reasoningEffort") for entry in levels if isinstance(entry, dict)}
+        if profile.reasoning_effort and supported and profile.reasoning_effort not in supported:
+            raise ValueError("所选推理深度不受当前模型支持，请在设置中重新选择。")
         logger().info("relay model selected model=%s native_catalog=%s", selected, native)
         profile = dataclasses.replace(profile, model=selected, codex_catalog=native)
     adapter = None
@@ -103,11 +120,24 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
             catalog_path, catalog_models = fetch(profile, secret, cli)
         personal_auth = bool(profile and has_personal_auth(config_home))
         proposed = candidate(original or b"", active, personal_model.strip() if profile is None else None, catalog_path, isolate_catalog, personal_auth, deepseek=bool(profile and profile.kind == "deepseek"))
+        if profile is None and state_path.exists():
+            saved = json.loads(state_path.read_text(encoding="utf-8"))
+            if "reasoning_present" in saved:
+                personal_doc = tomlkit.parse(proposed.decode("utf-8"))
+                if saved["reasoning_present"]:
+                    personal_doc["model_reasoning_effort"] = saved["reasoning"]
+                else:
+                    personal_doc.pop("model_reasoning_effort", None)
+                proposed = tomlkit.dumps(personal_doc).encode("utf-8")
         if profile:
             logger().info("personal account identity available=%s", personal_auth)
         env = clean_env()
         env["CODEX_SWITCH_REAL_CLI"] = str(cli)
         env["CODEX_SWITCH_PROVIDER"] = "launcher_custom" if profile else "openai"
+        if profile and profile.kind == "responses":
+            last_dir = data_dir() / "last-models"
+            last_dir.mkdir(parents=True, exist_ok=True)
+            env["CODEX_SWITCH_LAST_MODEL_FILE"] = str(last_dir / (profile.id + ".txt"))
         if profile and profile.kind == "deepseek":
             env["CODEX_SWITCH_FIXED_MODEL"] = profile.model
         env["CODEX_CLI_PATH"] = str(bridge)

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -16,8 +17,6 @@ def rewrite(line: bytes, provider: str, fixed_model: str = "") -> bytes:
         if fixed_model and (provider != "launcher_custom" or fixed_model != "deepseek-flash"):
             raise ValueError("invalid fixed model")
         is_thread = obj.get("method") != "turn/start"
-        if not is_thread and not fixed_model:
-            return line
         params = obj.setdefault("params", {})
         if not isinstance(params, dict):
             raise ValueError("invalid thread params")
@@ -27,6 +26,15 @@ def rewrite(line: bytes, provider: str, fixed_model: str = "") -> bytes:
         config = params.get("config")
         if not selected and isinstance(config, dict):
             selected = config.get("model")
+        last_file = os.environ.get("CODEX_SWITCH_LAST_MODEL_FILE")
+        if provider == "launcher_custom" and not fixed_model and last_file and isinstance(selected, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}", selected):
+            try:
+                with open(last_file, "w", encoding="utf-8") as stream:
+                    stream.write(selected)
+            except OSError:
+                pass
+        if not is_thread and not fixed_model:
+            return line
         if fixed_model and (selected is not None or is_thread):
             selected = selected if selected in ("deepseek-flash", "deepseek-v4-pro") else fixed_model
             params["model"] = selected

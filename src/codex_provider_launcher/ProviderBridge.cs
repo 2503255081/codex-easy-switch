@@ -63,7 +63,6 @@ public class ProviderBridge {
         bool turn=method=="turn/start";
         if(!thread && !turn)return line;
         string fixedModel=Environment.GetEnvironmentVariable("CODEX_SWITCH_FIXED_MODEL");
-        if(!thread && (string.IsNullOrEmpty(fixedModel) || provider!="launcher_custom"))return line;
         if(!string.IsNullOrEmpty(fixedModel) && (provider!="launcher_custom" || fixedModel!="deepseek-flash"))throw new Exception("Invalid fixed model.");
         var p=obj.ContainsKey("params")?obj["params"] as Dictionary<string,object>:null;
         if(p==null){p=new Dictionary<string,object>();obj["params"]=p;}
@@ -71,6 +70,10 @@ public class ProviderBridge {
         var config=p.ContainsKey("config")?p["config"] as Dictionary<string,object>:null;
         string selected=p.ContainsKey("model")?p["model"] as string:null;
         if(string.IsNullOrEmpty(selected) && config!=null && config.ContainsKey("model"))selected=config["model"] as string;
+        string lastFile=Environment.GetEnvironmentVariable("CODEX_SWITCH_LAST_MODEL_FILE");
+        if(provider=="launcher_custom" && string.IsNullOrEmpty(fixedModel) && !string.IsNullOrEmpty(lastFile) && !string.IsNullOrEmpty(selected) && System.Text.RegularExpressions.Regex.IsMatch(selected,@"\A[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}\z"))
+            try { File.WriteAllText(lastFile,selected,new UTF8Encoding(false)); } catch(IOException) {} catch(UnauthorizedAccessException) {}
+        if(!thread && (string.IsNullOrEmpty(fixedModel) || provider!="launcher_custom"))return line;
         if(!string.IsNullOrEmpty(fixedModel) && (selected!=null || thread)) {
             if(selected!="deepseek-flash" && selected!="deepseek-v4-pro")selected=fixedModel;
             p["model"]=selected;
