@@ -102,7 +102,7 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
                 raise ValueError("Codex 原生模型目录仅适用于 Responses 服务。")
             catalog_path, catalog_models = fetch(profile, secret, cli)
         personal_auth = bool(profile and has_personal_auth(config_home))
-        proposed = candidate(original or b"", active, personal_model.strip() if profile is None else None, catalog_path, isolate_catalog, personal_auth)
+        proposed = candidate(original or b"", active, personal_model.strip() if profile is None else None, catalog_path, isolate_catalog, personal_auth, deepseek=bool(profile and profile.kind == "deepseek"))
         if profile:
             logger().info("personal account identity available=%s", personal_auth)
         env = clean_env()

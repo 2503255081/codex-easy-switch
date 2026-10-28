@@ -48,6 +48,11 @@ class NativeBridgeTests(unittest.TestCase):
             env.pop("CODEX_SWITCH_LOG", None)
             lines = [{"id": i, "method": method, "params": {"model": "gpt-6.1-sol"}}
                      for i, method in enumerate(("thread/resume", "turn/start"), 1)]
+            lines.extend([{ "id": 3, "method": "turn/start", "params": {"model": "deepseek-v4-pro", "effort": "max", "config": {"model": "old"}}},
+                          {"id": 4, "method": "turn/start", "params": {"effort": "high"}}])
             result = subprocess.run([str(bridge), "app-server"], input="".join(json.dumps(x)+"\n" for x in lines), text=True, capture_output=True, timeout=20, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual([json.loads(line)["params"]["model"] for line in result.stdout.splitlines()], ["deepseek-flash", "deepseek-flash"])
+            messages = [json.loads(line)["params"] for line in result.stdout.splitlines()]
+            self.assertEqual([m.get("model") for m in messages], ["deepseek-flash", "deepseek-flash", "deepseek-v4-pro", None])
+            self.assertEqual(messages[2]["effort"], "max")
+            self.assertEqual(messages[2]["config"]["model"], "deepseek-v4-pro")

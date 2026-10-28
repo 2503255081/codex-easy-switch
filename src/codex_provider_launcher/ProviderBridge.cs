@@ -68,11 +68,16 @@ public class ProviderBridge {
         var p=obj.ContainsKey("params")?obj["params"] as Dictionary<string,object>:null;
         if(p==null){p=new Dictionary<string,object>();obj["params"]=p;}
         if(thread)p["modelProvider"]=provider;
-        if(!string.IsNullOrEmpty(fixedModel))p["model"]=fixedModel;
         var config=p.ContainsKey("config")?p["config"] as Dictionary<string,object>:null;
+        string selected=p.ContainsKey("model")?p["model"] as string:null;
+        if(string.IsNullOrEmpty(selected) && config!=null && config.ContainsKey("model"))selected=config["model"] as string;
+        if(!string.IsNullOrEmpty(fixedModel) && (selected!=null || thread)) {
+            if(selected!="deepseek-flash" && selected!="deepseek-v4-pro")selected=fixedModel;
+            p["model"]=selected;
+        }
         if(config!=null) {
             if(thread)config["model_provider"]=provider;
-            if(!string.IsNullOrEmpty(fixedModel))config["model"]=fixedModel;
+            if(!string.IsNullOrEmpty(fixedModel) && selected!=null)config["model"]=selected;
         }
         // Record routing decisions only, never prompts or credentials.
         string log=Environment.GetEnvironmentVariable("CODEX_SWITCH_LOG");

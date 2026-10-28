@@ -38,8 +38,11 @@ def deepseek_catalog() -> tuple[Path, list[dict]]:
                  apply_patch_tool_type="freeform", supports_parallel_tool_calls=True,
                  tool_mode=None, use_responses_lite=False, experimental_supported_tools=[],
                  supports_image_detail_original=True, auto_compact_token_limit=None)
-    model["supported_reasoning_levels"] = [{"effort": e, "description": e} for e in ("low", "high", "max")]
-    models = [model]
+    model["supported_reasoning_levels"] = [{"effort": e, "description": e} for e in ("none", "low", "high", "max")]
+    pro = copy.deepcopy(model)
+    pro.update(slug="deepseek-v4-pro", display_name="DeepSeek V4 Pro", priority=1,
+               input_modalities=["text"], supports_image_detail_original=False)
+    models = [model, pro]
     raw = json.dumps({"models": models}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     path = data_dir() / "catalogs" / ("catalog-" + hashlib.sha256(raw).hexdigest() + ".json")
     if path.exists() and path.read_bytes() != raw:

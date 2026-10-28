@@ -19,7 +19,7 @@
 
 - 个人账号直接启动；中转站只需填写地址和密钥，DeepSeek 只需填写密钥。
 - DeepSeek 按[官方 Codex 接入文档](https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/codex)直连原生 Responses API，保留命名空间和工具调用，不再经过 LiteLLM。普通 Chat Completions 服务仍可使用本机 LiteLLM 适配。
-- DeepSeek 模式使用 `deepseek-flash`，并为桌面端生成经当前 Codex CLI 验证的模型目录；启动或继续对话时固定使用该模型。切回个人账号或中转站时恢复各自的模型选择。
+- DeepSeek 模式提供 `deepseek-flash` 和 `deepseek-v4-pro`，支持关闭思考（none）、low、high、max 推理档位；同时设置模型目录和桌面端档位显示配置。启动默认使用 Flash，桌面中选择 Pro 后会保留选择；仅把旧对话残留的其他提供方模型替换为 Flash。Flash 支持图片，Pro 为文本模型。切回个人账号或中转站时恢复各自的模型选择。
 - 若本机已登录个人 ChatGPT 账号，切换到中转站或 DeepSeek 时保留 Codex 桌面端的账号身份和右下角个人额度显示；中转请求仍使用该服务的 API 密钥。个人额度不代表中转站或 DeepSeek 的余额。
 - API 密钥使用系统凭据库；非本机 HTTP 默认禁用。服务地址只保存在本机配置文件中。
 - 切换前通过实际 Codex CLI 在临时目录检查配置，备份原始配置，检测并发编辑；可在启动器中恢复上次配置。聊天和账号文件不会被主动改写。

@@ -19,7 +19,7 @@ class CatalogTests(unittest.TestCase):
             (root / "models_cache.json").write_text(json.dumps({"models": [{"slug": "native", "visibility": "list", "truncation_policy": {"mode": "tokens", "limit": 1}, "experimental_supported_tools": []}]}))
             with patch.dict("os.environ", {"CODEX_HOME": str(root)}), patch.object(catalog, "data_dir", return_value=root / "launcher"):
                 path, models = catalog.deepseek_catalog()
-            self.assertEqual([m["slug"] for m in models], ["deepseek-flash"])
+            self.assertEqual([m["slug"] for m in models], ["deepseek-flash", "deepseek-v4-pro"])
             self.assertEqual(models[0]["input_modalities"], ["text", "image"])
             self.assertEqual(models[0]["service_tiers"], [])
             self.assertIn("truncation_policy", json.loads(path.read_text(encoding="utf-8"))["models"][0])

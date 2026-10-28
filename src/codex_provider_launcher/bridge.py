@@ -23,13 +23,18 @@ def rewrite(line: bytes, provider: str, fixed_model: str = "") -> bytes:
             raise ValueError("invalid thread params")
         if is_thread:
             params["modelProvider"] = provider
-        if fixed_model:
-            params["model"] = fixed_model
+        selected = params.get("model")
+        config = params.get("config")
+        if not selected and isinstance(config, dict):
+            selected = config.get("model")
+        if fixed_model and (selected is not None or is_thread):
+            selected = selected if selected in ("deepseek-flash", "deepseek-v4-pro") else fixed_model
+            params["model"] = selected
         if isinstance(params.get("config"), dict):
             if is_thread:
                 params["config"]["model_provider"] = provider
-            if fixed_model:
-                params["config"]["model"] = fixed_model
+            if fixed_model and selected is not None:
+                params["config"]["model"] = selected
         return (json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
     except (ValueError, UnicodeError):
         raise ValueError("Cannot safely route this app-server request")

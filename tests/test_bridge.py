@@ -28,3 +28,13 @@ class BridgeTests(unittest.TestCase):
         line = b'{"method":"turn/start","params":{"model":"example"}}\n'
         self.assertEqual(rewrite(line, "launcher_custom"), line)
         self.assertEqual(rewrite(line, "openai"), line)
+
+    def test_deepseek_preserves_pro_and_effort_and_model_less_turn(self):
+        for method in ("thread/start", "thread/resume", "thread/fork", "turn/start"):
+            message = {"method": method, "params": {"model": "deepseek-v4-pro", "effort": "max", "config": {"model": "old"}}}
+            result = json.loads(rewrite(json.dumps(message).encode(), "launcher_custom", "deepseek-flash"))
+            self.assertEqual(result["params"]["model"], "deepseek-v4-pro")
+            self.assertEqual(result["params"]["config"]["model"], "deepseek-v4-pro")
+            self.assertEqual(result["params"]["effort"], "max")
+        result = json.loads(rewrite(b'{"method":"turn/start","params":{"effort":"high"}}', "launcher_custom", "deepseek-flash"))
+        self.assertNotIn("model", result["params"])

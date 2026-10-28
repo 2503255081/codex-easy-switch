@@ -75,6 +75,7 @@ class LaunchTests(unittest.TestCase):
             self.assertIsNone(adapter)
             config = tomlkit.parse((root / "config.toml").read_text())
             self.assertEqual(config["model"], "deepseek-flash")
+            self.assertTrue(set(("none", "low", "high", "max")).issubset(config["desktop"]["enabled-reasoning-efforts"]))
             provider = config["model_providers"]["launcher_custom"]
             self.assertEqual(provider["base_url"], "https://api.deepseek.com")
             self.assertEqual(provider["wire_api"], "responses")
