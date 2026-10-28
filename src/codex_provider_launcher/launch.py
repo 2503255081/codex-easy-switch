@@ -87,7 +87,6 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
                 if original is None:
                     config_path.unlink()
                 else:
-                    from .config import atomic_write
                     atomic_write(config_path, original)
             raise
         return child, adapter
