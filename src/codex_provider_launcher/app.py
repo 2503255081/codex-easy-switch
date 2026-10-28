@@ -54,7 +54,9 @@ class Launcher(tk.Tk):
         form.pack(fill="x", pady=10)
         self._field(form, "名称", self.name_var, 0)
         ttk.Label(form, text="接口类型").grid(row=1, column=0, sticky="w", pady=3)
-        ttk.Combobox(form, textvariable=self.kind, values=("responses", "deepseek", "openai_chat"), state="readonly").grid(row=1, column=1, sticky="ew", pady=3)
+        kinds = ttk.Combobox(form, textvariable=self.kind, values=("responses", "deepseek", "openai_chat"), state="readonly")
+        kinds.grid(row=1, column=1, sticky="ew", pady=3)
+        kinds.bind("<<ComboboxSelected>>", self.select_kind)
         self._field(form, "API 地址", self.url, 2)
         self._field(form, "模型 ID", self.model, 3)
         self._field(form, "API 密钥", self.key, 4, show="•")
@@ -118,6 +120,14 @@ class Launcher(tk.Tk):
         self.codex_catalog.set(p.codex_catalog)
         self.key.set("")
         self.status.set("如不修改密钥，请留空；当前密钥不会显示。")
+
+    def select_kind(self, _event=None):
+        if self.kind.get() == "deepseek":
+            if not self.url.get().strip():
+                self.url.set("https://api.deepseek.com")
+            if not self.model.get().strip():
+                self.model.set("deepseek-chat")
+            self.status.set("DeepSeek 官方地址与模型可以自行修改；请填写自己的 API 密钥。")
 
     def save(self):
         try:
