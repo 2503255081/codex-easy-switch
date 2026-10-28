@@ -13,9 +13,22 @@
 
 [全部版本、发布说明及 SHA256 校验文件](https://github.com/2503255081/codex-provider-launcher/releases)。这两个版本面向 Windows 10/11，内含 Python 和图形组件，不用执行安装命令。x86 启动器已在 64 位 Windows 的兼容环境中验证；它不会让官方 Codex Desktop 支持原本不支持的 32 位操作系统。EXE 尚未购买代码签名证书，Windows 可能显示未知发布者。
 
+## Linux 与 macOS 下载（免安装 Python）
+
+| 系统 | 下载 |
+| --- | --- |
+| Linux x64（Intel / AMD） | [下载 Linux x64](https://github.com/2503255081/codex-provider-launcher/releases/latest/download/Codex-Provider-Launcher-Linux-x64.tar.gz) |
+| Linux ARM64 | [下载 Linux ARM64](https://github.com/2503255081/codex-provider-launcher/releases/latest/download/Codex-Provider-Launcher-Linux-arm64.tar.gz) |
+| macOS Apple Silicon | [下载 macOS ARM64](https://github.com/2503255081/codex-provider-launcher/releases/latest/download/Codex-Provider-Launcher-macOS-arm64.zip) |
+| macOS Intel | [下载 macOS x64](https://github.com/2503255081/codex-provider-launcher/releases/latest/download/Codex-Provider-Launcher-macOS-x64.zip) |
+
+Linux：下载后解压，在解压出的文件夹中运行 `./Codex-Provider-Launcher`。启动器优先打开官方 ChatGPT Linux 桌面应用；如果没有安装桌面版，会在图形终端启动 Codex CLI。需要图形桌面、已解锁的 Secret Service 凭据库，以及桌面应用或 Codex CLI。CLI 模式暂不能可靠记住会话内的模型切换。Linux 包在 Ubuntu 22.04 上构建和测试；[官方 Linux 桌面应用](https://developers.openai.com/codex/linux/linux-app)有自己的系统要求。
+
+macOS：解压 ZIP，将 `Codex-Provider-Launcher.app` 放入应用程序文件夹并打开。需要先安装并登录官方 Codex 或 ChatGPT 桌面应用；密钥保存在钥匙串。两个包均在 macOS 15 原生构建和进行界面自检，真实桌面登录与对话尚未在 Mac 上验证。官方 Codex 桌面版的架构支持以 OpenAI 当前说明为准；Intel 启动器的构建成功不代表官方桌面版支持 Intel。应用尚未使用 Apple 开发者证书签名或公证，macOS 可能阻止打开。
+
 EXE 提供个人账号、中转站 Responses API、DeepSeek 原生 API 三个入口；普通 Chat Completions 的可选 LiteLLM 适配器不包含在便携包内。密钥由每位使用者保存在自己的 Windows 凭据管理器中，发行包不含开发者的密钥、域名或配置。
 
-**目前是实验版本。** Windows 图形界面、隔离配置校验和模拟协议转换已测试；Linux 在 WSL 中通过核心测试；DeepSeek 原生 Responses 的流式和同名命名空间工具调用已实测；macOS 桌面启动和完整的桌面切换尚未验证。请先备份配置和聊天数据，不要把它用于无法中断的工作。
+**目前是实验版本。** Windows 图形界面、隔离配置校验和模拟协议转换已测试；Linux、macOS 便携包已在各自系统构建并检查图形界面和路由桥接；DeepSeek 原生 Responses 的流式和同名命名空间工具调用已实测。各系统的完整桌面切换尚未全部验证。请先备份配置和聊天数据，不要把它用于无法中断的工作。
 
 ## 适用场景：个人额度用完后继续工作
 
@@ -82,3 +95,5 @@ python -m unittest discover -s tests -v
 ## 从源码打包 Windows EXE
 
 分别使用 32 位或 64 位 Python 3.13 环境运行 `python -m pip install . -r packaging/requirements.txt`，再运行 `python packaging/build_windows.py`。程序会按当前 Python 的位数生成 x86 或 x64 EXE 和 SHA256 校验文件到 `dist/`。编译桥接程序需要 Windows 自带的 .NET Framework 4 编译器；成品已包含桥接程序。也可以在 GitHub Actions 中手动运行 `Windows portable EXE` 工作流构建两个版本。
+
+Linux 或 macOS 使用目标系统和架构的 Python 3.12，执行 `python -m pip install . -r packaging/requirements.txt`、`python packaging/build_posix.py`。程序会生成平台对应的压缩包和 SHA256 文件，也可在 GitHub Actions 中手动运行 `Linux and macOS portable builds` 工作流。

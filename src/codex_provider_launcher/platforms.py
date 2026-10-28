@@ -87,7 +87,9 @@ def posix_bridge() -> Path:
 
 def find_mac_desktop() -> Path | None:
     for candidate in (Path("/Applications/Codex.app/Contents/MacOS/Codex"),
-                      Path("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT")):
+                      Path("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"),
+                      Path.home() / "Applications/Codex.app/Contents/MacOS/Codex",
+                      Path.home() / "Applications/ChatGPT.app/Contents/MacOS/ChatGPT"):
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return candidate
     return None

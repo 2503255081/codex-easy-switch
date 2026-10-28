@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-provider-launcher"
-version = "0.2.1"
+version = "0.3.0"
 description = "A cross-platform local launcher for Codex provider profiles"
 requires-python = ">=3.10"
 dependencies = ["tomlkit>=0.13,<1", "keyring>=25,<26", "filelock>=3.15,<4"]
