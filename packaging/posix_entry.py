@@ -37,14 +37,34 @@ def self_test(report):
                                        "bridge": True, "config": True}), encoding="utf-8")
 
 
+def gui_self_test(report):
+    import logging
+    from codex_provider_launcher import app as launcher_app, profiles
+    with tempfile.TemporaryDirectory(prefix="launcher-posix-gui-") as directory:
+        profiles.data_dir = lambda: Path(directory)
+        launcher_app.data_dir = lambda: Path(directory)
+        app = launcher_app.Launcher()
+        try:
+            app.update()
+            app.open_settings("relay")
+            app.update()
+            assert len(app.launch_buttons) == 3
+            assert app.test_button.cget("text") == "测试连接并获取模型"
+            assert app.effort_entry.cget("state") == "readonly"
+            Path(report).write_text(json.dumps({"ok": True, "gui": True}), encoding="utf-8")
+        finally:
+            app.destroy()
+            logging.shutdown()
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--bridge":
         sys.argv.pop(1)
         from codex_provider_launcher.bridge import main
         sys.exit(main())
-    if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
+    if len(sys.argv) == 3 and sys.argv[1] in ("--self-test", "--self-test-gui"):
         try:
-            self_test(sys.argv[2])
+            (self_test if sys.argv[1] == "--self-test" else gui_self_test)(sys.argv[2])
         except Exception as exc:
             Path(sys.argv[2]).write_text(json.dumps({"ok": False, "error": type(exc).__name__ + ": " + str(exc)}), encoding="utf-8")
             sys.exit(1)
