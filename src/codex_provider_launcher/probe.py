@@ -30,7 +30,19 @@ def probe_home():
 
 
 def clean_env() -> dict[str, str]:
-    return {k: v for k, v in os.environ.items() if k.upper() not in _OVERRIDES and not k.upper().startswith("CODEX_SWITCH_")}
+    env = {k: v for k, v in os.environ.items() if k.upper() not in _OVERRIDES and not k.upper().startswith("CODEX_SWITCH_")}
+    if getattr(sys, "frozen", False) and sys.platform.startswith("linux"):
+        # The portable launcher's extracted shared libraries must not be injected
+        # into the separately installed Codex / ChatGPT executable.
+        original = env.pop("LD_LIBRARY_PATH_ORIG", None)
+        if original is None:
+            env.pop("LD_LIBRARY_PATH", None)
+        else:
+            env["LD_LIBRARY_PATH"] = original
+        for key in list(env):
+            if key.startswith("_PYI_"):
+                env.pop(key, None)
+    return env
 
 
 

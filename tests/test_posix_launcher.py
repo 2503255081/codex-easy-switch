@@ -35,6 +35,14 @@ class PosixLauncherTests(unittest.TestCase):
             with patch.object(Path, "home", return_value=root), patch.object(platforms.shutil, "which", return_value=None):
                 self.assertEqual(platforms.find_posix_cli(), binary.resolve())
 
+    def test_packaged_linux_does_not_inject_frozen_library_path(self):
+        from codex_provider_launcher.probe import clean_env
+        with patch.object(sys, "frozen", True, create=True), patch.object(sys, "platform", "linux"), \
+             patch.dict(os.environ, {"LD_LIBRARY_PATH": "/launcher-extracted", "LD_LIBRARY_PATH_ORIG": "/user-library", "_PYI_TEST": "fixture"}):
+            env = clean_env()
+            self.assertEqual(env["LD_LIBRARY_PATH"], "/user-library")
+            self.assertNotIn("_PYI_TEST", env)
+
     def test_official_desktop_bundle_cli_is_preferred(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
