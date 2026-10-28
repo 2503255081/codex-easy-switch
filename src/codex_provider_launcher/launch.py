@@ -113,6 +113,11 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
             result = validate(cli, value)
             if catalog_models is not None:
                 verify(catalog_models, result)
+                selected_model = next((item for item in result[3]["data"] if item.get("id") == active.model), {})
+                tiers = selected_model.get("serviceTiers") or []
+                logger().info("selected model Fast option available=%s", any(
+                    isinstance(item, dict) and (item.get("id") in ("fast", "priority") or str(item.get("name", "")).lower() == "fast")
+                    for item in tiers))
         commit(config_path, original, proposed, data_dir() / "backups", check)
         logger().info("configuration validated and saved; recovery record created")
         try:

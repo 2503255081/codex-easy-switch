@@ -56,6 +56,15 @@ class CatalogTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             catalog.verify(models, {3: {"data": [{"id": "model", "hidden": False}, {"id": "hidden", "hidden": False}]}})
 
+    def test_fast_advertisement_must_be_selectable_in_codex(self):
+        models = [{"slug": "model", "visibility": "list", "additional_speed_tiers": ["fast"],
+                   "service_tiers": [{"id": "priority", "name": "Fast"}]}]
+        good = {3: {"data": [{"id": "model", "hidden": False, "serviceTiers": [{"id": "priority", "name": "Fast"}]}]}}
+        catalog.verify(models, good)
+        lost = {3: {"data": [{"id": "model", "hidden": False, "serviceTiers": []}]}}
+        with self.assertRaisesRegex(ValueError, "Fast"):
+            catalog.verify(models, lost)
+
     def test_external_catalog_is_only_isolated_when_requested(self):
         raw = b'model_catalog_json = "old.json"\n[projects."/project"]\ntrust_level="trusted"\n'
         profile = new_profile("test", "responses", "https://example.com/v1", "model")

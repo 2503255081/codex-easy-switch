@@ -130,3 +130,15 @@ def verify(models: list[dict], results: dict) -> None:
     expected = {model["slug"]: model["visibility"] == "list" for model in models}
     if actual != expected:
         raise ValueError("Codex 读取的模型列表与服务端目录不一致，配置未更改。")
+    by_id = {item["id"]: item for item in data}
+    for model in models:
+        if model["visibility"] != "list":
+            continue
+        advertised = "fast" in (model.get("additional_speed_tiers") or []) or any(
+            isinstance(t, dict) and (t.get("id") in ("fast", "priority") or str(t.get("name", "")).lower() == "fast")
+            for t in (model.get("service_tiers") or []))
+        entry = by_id[model["slug"]]
+        selectable = any(isinstance(t, dict) and (t.get("id") in ("fast", "priority") or str(t.get("name", "")).lower() == "fast")
+                         for t in (entry.get("serviceTiers") or []))
+        if advertised and not selectable:
+            raise ValueError("中转站声明了 Fast，但当前 Codex 未识别为可选择的速度档位：" + model["slug"])
