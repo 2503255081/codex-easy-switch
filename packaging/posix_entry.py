@@ -48,9 +48,12 @@ def gui_self_test(report):
             app.update()
             app.open_settings("relay")
             app.update()
-            assert len(app.launch_buttons) == 3
-            assert app.test_button.cget("text") == "测试连接并获取模型"
-            assert app.effort_entry.cget("state") == "readonly"
+            if len(app.launch_buttons) != 3:
+                raise RuntimeError("unexpected launch button count")
+            if str(app.test_button.cget("text")) != "测试连接并获取模型":
+                raise RuntimeError("connection test button not available")
+            if str(app.effort_entry.cget("state")) != "readonly":
+                raise RuntimeError("reasoning selector is not readonly")
             Path(report).write_text(json.dumps({"ok": True, "gui": True}), encoding="utf-8")
         finally:
             app.destroy()
