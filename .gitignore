@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+.env
+.env.*
+*.sqlite*
+profiles.json
+auth.json
+config.toml
+*.log

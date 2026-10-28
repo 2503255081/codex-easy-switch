@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-provider-launcher"
+version = "0.1.0"
+description = "A cross-platform local launcher for Codex provider profiles"
+requires-python = ">=3.10"
+dependencies = ["tomlkit>=0.13,<1", "keyring>=25,<26", "filelock>=3.15,<4"]
+
+[project.optional-dependencies]
+chat = ["litellm[proxy]>=1.80,<2"]
+test = ["pytest>=8,<10"]
+
+[project.scripts]
+codex-provider-launcher = "codex_provider_launcher.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+codex_provider_launcher = ["ProviderBridge.cs"]

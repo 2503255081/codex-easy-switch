@@ -1,0 +1,73 @@
+"""Forward app-server calls while choosing the provider for existing threads."""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import threading
+
+
+def rewrite(line: bytes, provider: str) -> bytes:
+    try:
+        obj = json.loads(line)
+        if not isinstance(obj, dict) or obj.get("method") not in ("thread/start", "thread/resume", "thread/fork"):
+            return line
+        params = obj.setdefault("params", {})
+        if not isinstance(params, dict):
+            raise ValueError("invalid thread params")
+        params["modelProvider"] = provider
+        if isinstance(params.get("config"), dict):
+            params["config"]["model_provider"] = provider
+        return (json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
+    except (ValueError, UnicodeError):
+        raise ValueError("Cannot safely route this app-server request")
+
+
+def main():
+    target = os.environ.get("CODEX_SWITCH_REAL_CLI", "")
+    provider = os.environ.get("CODEX_SWITCH_PROVIDER", "")
+    if not target or not os.path.isfile(target) or provider not in ("openai", "launcher_custom"):
+        print("Provider bridge is not configured.", file=sys.stderr)
+        return 1
+    args = sys.argv[1:]
+    server = "app-server" in args and not any(x in args for x in ("generate-ts", "generate-json-schema", "--help"))
+    env = os.environ.copy()
+    env["CODEX_CLI_PATH"] = target
+    process = subprocess.Popen([target, *args], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    def copy(source, destination):
+        try:
+            while chunk := os.read(source.fileno(), 65536):
+                destination.write(chunk)
+                destination.flush()
+        except (BrokenPipeError, OSError):
+            pass
+    def send():
+        try:
+            if server:
+                for line in sys.stdin.buffer:
+                    process.stdin.write(rewrite(line, provider))
+                    process.stdin.flush()
+            else:
+                copy(sys.stdin.buffer, process.stdin)
+        except (ValueError, BrokenPipeError, OSError):
+            process.kill()
+        finally:
+            process.stdin.close()
+    out = threading.Thread(target=copy, args=(process.stdout, sys.stdout.buffer), daemon=True)
+    err = threading.Thread(target=copy, args=(process.stderr, sys.stderr.buffer), daemon=True)
+    inp = threading.Thread(target=send, daemon=True)
+    for thread in (out, err, inp):
+        thread.start()
+    try:
+        code = process.wait()
+        out.join()
+        err.join()
+        return code
+    finally:
+        if process.poll() is None:
+            process.kill()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
