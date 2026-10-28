@@ -54,17 +54,26 @@ public class ProviderBridge {
         b.Append('\\',slashes*2); return b.Append('"').ToString();
     }
     public static string Rewrite(string line,string provider) {
-        if(line.IndexOf("thread/start",StringComparison.Ordinal)<0 && line.IndexOf("thread/resume",StringComparison.Ordinal)<0 && line.IndexOf("thread/fork",StringComparison.Ordinal)<0)return line;
+        if(line.IndexOf("thread/start",StringComparison.Ordinal)<0 && line.IndexOf("thread/resume",StringComparison.Ordinal)<0 && line.IndexOf("thread/fork",StringComparison.Ordinal)<0 && line.IndexOf("turn/start",StringComparison.Ordinal)<0)return line;
         var json=new JavaScriptSerializer {MaxJsonLength=int.MaxValue,RecursionLimit=512};
         var obj=json.DeserializeObject(line) as Dictionary<string,object>;
         if(obj==null || !obj.ContainsKey("method"))return line;
         string method=obj["method"] as string;
-        if(method!="thread/start" && method!="thread/resume" && method!="thread/fork")return line;
+        bool thread=method=="thread/start" || method=="thread/resume" || method=="thread/fork";
+        bool turn=method=="turn/start";
+        if(!thread && !turn)return line;
+        string fixedModel=Environment.GetEnvironmentVariable("CODEX_SWITCH_FIXED_MODEL");
+        if(!thread && (string.IsNullOrEmpty(fixedModel) || provider!="launcher_custom"))return line;
+        if(!string.IsNullOrEmpty(fixedModel) && (provider!="launcher_custom" || fixedModel!="deepseek-chat"))throw new Exception("Invalid fixed model.");
         var p=obj.ContainsKey("params")?obj["params"] as Dictionary<string,object>:null;
         if(p==null){p=new Dictionary<string,object>();obj["params"]=p;}
-        p["modelProvider"]=provider;
+        if(thread)p["modelProvider"]=provider;
+        if(!string.IsNullOrEmpty(fixedModel))p["model"]=fixedModel;
         var config=p.ContainsKey("config")?p["config"] as Dictionary<string,object>:null;
-        if(config!=null)config["model_provider"]=provider;
+        if(config!=null) {
+            if(thread)config["model_provider"]=provider;
+            if(!string.IsNullOrEmpty(fixedModel))config["model"]=fixedModel;
+        }
         // Record routing decisions only, never prompts or credentials.
         string log=Environment.GetEnvironmentVariable("CODEX_SWITCH_LOG");
         if(!string.IsNullOrEmpty(log))try{File.AppendAllText(log,DateTime.UtcNow.ToString("o")+" "+method+" provider="+provider+Environment.NewLine);}catch{}

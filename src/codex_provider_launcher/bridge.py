@@ -8,17 +8,28 @@ import sys
 import threading
 
 
-def rewrite(line: bytes, provider: str) -> bytes:
+def rewrite(line: bytes, provider: str, fixed_model: str = "") -> bytes:
     try:
         obj = json.loads(line)
-        if not isinstance(obj, dict) or obj.get("method") not in ("thread/start", "thread/resume", "thread/fork"):
+        if not isinstance(obj, dict) or obj.get("method") not in ("thread/start", "thread/resume", "thread/fork", "turn/start"):
+            return line
+        if fixed_model and (provider != "launcher_custom" or fixed_model != "deepseek-chat"):
+            raise ValueError("invalid fixed model")
+        is_thread = obj.get("method") != "turn/start"
+        if not is_thread and not fixed_model:
             return line
         params = obj.setdefault("params", {})
         if not isinstance(params, dict):
             raise ValueError("invalid thread params")
-        params["modelProvider"] = provider
+        if is_thread:
+            params["modelProvider"] = provider
+        if fixed_model:
+            params["model"] = fixed_model
         if isinstance(params.get("config"), dict):
-            params["config"]["model_provider"] = provider
+            if is_thread:
+                params["config"]["model_provider"] = provider
+            if fixed_model:
+                params["config"]["model"] = fixed_model
         return (json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
     except (ValueError, UnicodeError):
         raise ValueError("Cannot safely route this app-server request")
@@ -46,7 +57,7 @@ def main():
         try:
             if server:
                 for line in sys.stdin.buffer:
-                    process.stdin.write(rewrite(line, provider))
+                    process.stdin.write(rewrite(line, provider, os.environ.get("CODEX_SWITCH_FIXED_MODEL", "")))
                     process.stdin.flush()
             else:
                 copy(sys.stdin.buffer, process.stdin)

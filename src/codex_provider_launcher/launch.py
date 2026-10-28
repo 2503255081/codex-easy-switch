@@ -12,11 +12,21 @@ import tomlkit
 
 from .adapter import ChatAdapter
 from .diagnostics import logger
-from .catalog import discover, fetch, verify
+from .catalog import deepseek_catalog, discover, fetch, verify
 from .config import atomic_write, candidate, commit
 from .platforms import ensure_windows_bridge, is_desktop_running, posix_bridge, windows_runtime
 from .probe import clean_env, validate
 from .profiles import CredentialStore, Profile, data_dir
+
+
+def has_personal_auth(config_home: Path) -> bool:
+    """Detect an existing ChatGPT login without printing or copying credentials."""
+    try:
+        auth = json.loads((config_home / "auth.json").read_text(encoding="utf-8"))
+        tokens = auth.get("tokens") or {}
+        return auth.get("auth_mode") == "chatgpt" and bool(tokens.get("access_token"))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
 
 
 def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_path: str, isolate_catalog: bool = False):
@@ -79,14 +89,22 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
             active = dataclasses.replace(profile, kind="responses", base_url=adapter.url)
             secret = adapter.master
         catalog_path, catalog_models = None, None
+        if profile and profile.kind == "deepseek":
+            catalog_path, catalog_models = deepseek_catalog()
+            logger().info("prepared DeepSeek model catalog for CLI validation")
         if profile and profile.codex_catalog:
             if profile.kind != "responses":
                 raise ValueError("Codex 原生模型目录仅适用于 Responses 服务。")
             catalog_path, catalog_models = fetch(profile, secret, cli)
-        proposed = candidate(original or b"", active, personal_model.strip() if profile is None else None, catalog_path, isolate_catalog)
+        personal_auth = bool(profile and has_personal_auth(config_home))
+        proposed = candidate(original or b"", active, personal_model.strip() if profile is None else None, catalog_path, isolate_catalog, personal_auth)
+        if profile:
+            logger().info("personal account identity available=%s", personal_auth)
         env = clean_env()
         env["CODEX_SWITCH_REAL_CLI"] = str(cli)
         env["CODEX_SWITCH_PROVIDER"] = "launcher_custom" if profile else "openai"
+        if profile and profile.kind == "deepseek":
+            env["CODEX_SWITCH_FIXED_MODEL"] = profile.model
         env["CODEX_CLI_PATH"] = str(bridge)
         if secret:
             env["CODEX_LAUNCHER_API_KEY"] = secret

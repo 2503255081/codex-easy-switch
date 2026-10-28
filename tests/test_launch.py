@@ -1,4 +1,5 @@
 import os
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +12,16 @@ from codex_provider_launcher.profiles import new_profile
 
 @unittest.skipUnless(os.name == "nt", "desktop launch orchestration mock currently covers Windows")
 class LaunchTests(unittest.TestCase):
+    def test_personal_login_detection_handles_missing_and_api_key_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self.assertFalse(launch.has_personal_auth(root))
+            path = root / "auth.json"
+            path.write_text(json.dumps({"auth_mode": "apikey"}))
+            self.assertFalse(launch.has_personal_auth(root))
+            path.write_text(json.dumps({"auth_mode": "chatgpt", "tokens": {"access_token": "fixture"}}))
+            self.assertTrue(launch.has_personal_auth(root))
+
     def test_personal_relay_roundtrip_preserves_auth_and_projects(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)

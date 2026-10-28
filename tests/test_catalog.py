@@ -13,6 +13,17 @@ from codex_provider_launcher.profiles import new_profile
 
 
 class CatalogTests(unittest.TestCase):
+    def test_deepseek_catalog_uses_current_schema_template(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "models_cache.json").write_text(json.dumps({"models": [{"slug": "native", "visibility": "list", "truncation_policy": {"mode": "tokens", "limit": 1}, "experimental_supported_tools": []}]}))
+            with patch.dict("os.environ", {"CODEX_HOME": str(root)}), patch.object(catalog, "data_dir", return_value=root / "launcher"):
+                path, models = catalog.deepseek_catalog()
+            self.assertEqual([m["slug"] for m in models], ["deepseek-chat"])
+            self.assertEqual(models[0]["input_modalities"], ["text"])
+            self.assertEqual(models[0]["service_tiers"], [])
+            self.assertIn("truncation_policy", json.loads(path.read_text(encoding="utf-8"))["models"][0])
+
     def test_model_discovery_filters_hidden_and_fast_models(self):
         observed = []
         class Handler(BaseHTTPRequestHandler):

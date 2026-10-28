@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 import re
 import subprocess
@@ -17,6 +18,32 @@ from .profiles import Profile, data_dir
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+def deepseek_catalog() -> tuple[Path, list[dict]]:
+    """Build from the installed Codex cache; the caller validates with its CLI."""
+    import os
+    home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
+    try:
+        cached = json.loads((home / "models_cache.json").read_text(encoding="utf-8"))
+        models = cached.get("models")
+        template = next(m for m in models if isinstance(m, dict) and m.get("visibility") == "list" and m.get("slug"))
+    except (OSError, ValueError, TypeError, StopIteration) as exc:
+        raise RuntimeError("找不到可用的 Codex 原生模型目录。请先用个人账号正常启动一次 Codex 后重试。") from exc
+    model = copy.deepcopy(template)
+    model.update(slug="deepseek-chat", display_name="DeepSeek Chat", description="DeepSeek 官方 API（通过本地适配器）",
+                 visibility="list", priority=0, default_reasoning_level="low", context_window=64000,
+                 max_context_window=64000, input_modalities=["text"], additional_speed_tiers=[],
+                 service_tiers=[], availability_nux=None, upgrade=None)
+    model["supported_reasoning_levels"] = [{"effort": "low", "description": "默认"}]
+    models = [model]
+    raw = json.dumps({"models": models}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    path = data_dir() / "catalogs" / ("catalog-" + hashlib.sha256(raw).hexdigest() + ".json")
+    if path.exists() and path.read_bytes() != raw:
+        raise RuntimeError("模型目录文件不匹配。")
+    if not path.exists():
+        atomic_write(path, raw)
+    return path, models
 
 
 def discover(profile: Profile, key: str, cli: Path, preferred: str = "") -> tuple[str, bool]:

@@ -16,7 +16,7 @@ PROVIDER = "launcher_custom"
 CONFLICTS = ("profile", "model_catalog_json", "openai_base_url", "forced_login_method")
 
 
-def candidate(original: bytes, profile: Profile | None, personal_model: str | None = None, catalog: Path | None = None, isolate_catalog: bool = False) -> bytes:
+def candidate(original: bytes, profile: Profile | None, personal_model: str | None = None, catalog: Path | None = None, isolate_catalog: bool = False, personal_auth: bool = False) -> bytes:
     """Generate a candidate. Unrecognized overrides are kept and stop switching."""
     doc = tomlkit.parse(original.decode("utf-8-sig"))
     if "model_catalog_json" in doc:
@@ -56,6 +56,8 @@ def candidate(original: bytes, profile: Profile | None, personal_model: str | No
         entry["base_url"] = profile.base_url
         entry["wire_api"] = "responses"
         entry["env_key"] = "CODEX_LAUNCHER_API_KEY"
+        if personal_auth:
+            entry["requires_openai_auth"] = True
         doc["model_providers"][PROVIDER] = entry
         if catalog is not None:
             doc["model_catalog_json"] = str(catalog)
