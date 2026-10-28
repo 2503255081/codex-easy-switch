@@ -1,6 +1,8 @@
 name: Linux and macOS portable builds
 on:
   workflow_dispatch:
+  push:
+    branches: [portable-posix-build]
 jobs:
   build:
     strategy:
