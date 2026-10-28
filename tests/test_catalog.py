@@ -1,7 +1,10 @@
 import json
 import tempfile
 import unittest
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from codex_provider_launcher import catalog
@@ -10,6 +13,32 @@ from codex_provider_launcher.profiles import new_profile
 
 
 class CatalogTests(unittest.TestCase):
+    def test_model_discovery_filters_hidden_and_fast_models(self):
+        observed = []
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+            def do_GET(self):
+                observed.append(self.headers.get("Authorization"))
+                raw = json.dumps({"models": [
+                    {"slug": "hidden", "visibility": "hide"},
+                    {"slug": "model--fast", "visibility": "list"},
+                    {"slug": "model", "visibility": "list"}]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            profile = new_profile("test", "responses", f"http://127.0.0.1:{server.server_port}/v1", "auto")
+            with patch.object(catalog.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="codex-cli 1.0")):
+                self.assertEqual(catalog.discover(profile, "fixture-only-key", Path("cli")), ("model", True))
+            self.assertEqual(observed, ["Bearer fixture-only-key"])
+        finally:
+            server.shutdown()
+            server.server_close()
+
     def test_checks_visibility_and_fast_duplicates(self):
         models = [{"slug": "model", "visibility": "list"}, {"slug": "hidden", "visibility": "hide"}]
         catalog.verify(models, {3: {"data": [{"id": "model", "hidden": False}, {"id": "hidden", "hidden": True}]}})

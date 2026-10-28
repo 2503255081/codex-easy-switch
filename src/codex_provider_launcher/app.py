@@ -1,172 +1,178 @@
-"""Small cross-platform desktop launcher."""
+"""A small launcher that asks only for the selected service's essentials."""
 from __future__ import annotations
 
-import sys
+import dataclasses
 import os
 import threading
 import tkinter as tk
-from tkinter import messagebox, ttk
 from pathlib import Path
+from tkinter import messagebox, ttk
+from urllib.parse import urlsplit
 
 from .config import restore_last
 from .launch import launch
 from .platforms import is_desktop_running
-from .profiles import CredentialStore, ProfileStore, data_dir, new_profile
+from .profiles import CredentialStore, ProfileStore, data_dir, new_profile, normalize_url
 
 
 class Launcher(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Codex Provider Launcher")
-        self.geometry("660x690")
-        self.minsize(600, 650)
+        self.title("Codex 启动器")
+        self.geometry("500x390")
+        self.minsize(460, 360)
         self.store = ProfileStore()
         self.vault = CredentialStore()
         self.adapters = []
         self.profiles = []
-        self.profile_map = {}
-        self.protocol("WM_DELETE_WINDOW", self.close)
-        self.selection = tk.StringVar()
-        self.name_var = tk.StringVar()
-        self.kind = tk.StringVar(value="responses")
+        self.busy = False
+        self.mode = tk.StringVar(value="relay")
         self.url = tk.StringVar()
-        self.model = tk.StringVar()
         self.key = tk.StringVar()
-        self.personal_model = tk.StringVar()
-        self.cli_path = tk.StringVar()
-        self.desktop_path = tk.StringVar()
-        self.allow_http = tk.BooleanVar()
-        self.codex_catalog = tk.BooleanVar()
-        self.isolate_catalog = tk.BooleanVar()
-        self.status = tk.StringVar(value="选择个人账号，或添加一个 API 服务。")
-        outer = ttk.Frame(self, padding=16)
+        self.status = tk.StringVar(value="请选择一种方式启动 Codex。")
+        self.settings_window = None
+        self.active_profile = None
+        self.protocol("WM_DELETE_WINDOW", self.close)
+
+        outer = ttk.Frame(self, padding=20)
         outer.pack(fill="both", expand=True)
-        ttk.Label(outer, text="Codex 启动器", font=("TkDefaultFont", 16, "bold")).pack(anchor="w")
-        ttk.Label(outer, text="切换个人账号或兼容接口；原有聊天和项目配置会保留。").pack(anchor="w", pady=(2, 10))
-        row = ttk.Frame(outer)
-        row.pack(fill="x")
-        ttk.Label(row, text="启动方式").pack(side="left")
-        self.choices = ttk.Combobox(row, textvariable=self.selection, state="readonly")
-        self.choices.pack(side="left", fill="x", expand=True, padx=8)
-        self.choices.bind("<<ComboboxSelected>>", self.select_profile)
-        ttk.Button(row, text="新建", command=self.new).pack(side="left")
-        form = ttk.LabelFrame(outer, text="API 服务设置", padding=10)
-        form.pack(fill="x", pady=10)
-        self._field(form, "名称", self.name_var, 0)
-        ttk.Label(form, text="接口类型").grid(row=1, column=0, sticky="w", pady=3)
-        kinds = ttk.Combobox(form, textvariable=self.kind, values=("responses", "deepseek", "openai_chat"), state="readonly")
-        kinds.grid(row=1, column=1, sticky="ew", pady=3)
-        kinds.bind("<<ComboboxSelected>>", self.select_kind)
-        self._field(form, "API 地址", self.url, 2)
-        self._field(form, "模型 ID", self.model, 3)
-        self._field(form, "API 密钥", self.key, 4, show="•")
-        ttk.Checkbutton(form, text="允许非本机 HTTP（密钥会明文传输）", variable=self.allow_http).grid(row=5, column=1, sticky="w")
-        ttk.Checkbutton(form, text="同步 OpenCodex 原生模型目录", variable=self.codex_catalog).grid(row=6, column=1, sticky="w")
-        buttons = ttk.Frame(form)
-        buttons.grid(row=7, column=1, sticky="w", pady=(7, 0))
-        ttk.Button(buttons, text="保存服务", command=self.save).pack(side="left")
-        ttk.Button(buttons, text="删除服务", command=self.delete).pack(side="left", padx=6)
-        form.columnconfigure(1, weight=1)
-        options = ttk.LabelFrame(outer, text="启动选项", padding=10)
-        options.pack(fill="x")
-        self._field(options, "个人账号模型", self.personal_model, 0)
-        ttk.Checkbutton(options, text="隔离旧模型目录配置（原文件自动备份）", variable=self.isolate_catalog).grid(row=3, column=1, sticky="w")
-        if sys.platform != "win32":
-            self._field(options, "Codex CLI 路径", self.cli_path, 1)
-        if sys.platform == "darwin":
-            self._field(options, "桌面程序路径", self.desktop_path, 2)
-        options.columnconfigure(1, weight=1)
-        ttk.Label(outer, text="密钥保存在系统凭据库。Chat 接口需要安装 LiteLLM 可选依赖；使用期间请保持启动器打开。", wraplength=600).pack(anchor="w", pady=8)
-        self.launch_button = ttk.Button(outer, text="启动 Codex", command=self.start)
-        self.launch_button.pack(fill="x")
-        ttk.Button(outer, text="恢复上一次切换前的配置", command=self.restore).pack(fill="x", pady=(5, 0))
-        ttk.Label(outer, textvariable=self.status, wraplength=600).pack(anchor="w", pady=7)
-        self.reload()
-
-    @staticmethod
-    def _field(parent, title, variable, row, show=None):
-        ttk.Label(parent, text=title).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=3)
-        ttk.Entry(parent, textvariable=variable, show=show).grid(row=row, column=1, sticky="ew", pady=3)
-
-    def reload(self, select="个人账号"):
+        header = ttk.Frame(outer)
+        header.pack(fill="x")
+        ttk.Label(header, text="Codex 启动器", font=("TkDefaultFont", 17, "bold")).pack(side="left")
+        ttk.Button(header, text="⚙ 设置", command=self.open_settings).pack(side="right")
+        ttk.Label(outer, text="选择使用方式，然后启动 Codex。", wraplength=480).pack(anchor="w", pady=(3, 14))
+        self.launch_buttons = []
+        for mode, label in (("personal", "个人账号"), ("relay", "中转站"), ("deepseek", "DeepSeek")):
+            button = ttk.Button(outer, text=label, command=lambda choice=mode: self.launch_mode(choice))
+            button.pack(fill="x", ipady=9, pady=5)
+            self.launch_buttons.append(button)
+        ttk.Label(outer, textvariable=self.status, wraplength=480).pack(anchor="w", pady=12)
         try:
             self.profiles = self.store.load()
-            self.profile_map = {f"{p.name} [{p.id[:8]}]": p for p in self.profiles}
-            self.choices["values"] = ["个人账号", *self.profile_map]
-            self.selection.set(select if select in self.choices["values"] else "个人账号")
         except Exception as exc:
             messagebox.showerror("无法读取服务设置", str(exc))
 
-    def new(self):
-        self.selection.set("个人账号")
-        self.name_var.set("")
-        self.kind.set("responses")
-        self.url.set("")
-        self.model.set("")
-        self.key.set("")
-        self.allow_http.set(False)
-        self.codex_catalog.set(False)
-        self.status.set("填写服务设置后点击保存。DeepSeek 官方地址可填写 https://api.deepseek.com。")
-
-    def select_profile(self, _event=None):
-        p = self.profile_map.get(self.selection.get())
-        if not p:
+    def open_settings(self, mode="relay"):
+        if self.settings_window is not None and self.settings_window.winfo_exists():
+            self.settings_window.lift()
             return
-        self.name_var.set(p.name)
-        self.kind.set(p.kind)
-        self.url.set(p.base_url)
-        self.model.set(p.model)
-        self.allow_http.set(p.allow_http)
-        self.codex_catalog.set(p.codex_catalog)
-        self.key.set("")
-        self.status.set("如不修改密钥，请留空；当前密钥不会显示。")
+        self.mode.set(mode)
+        window = tk.Toplevel(self)
+        self.settings_window = window
+        window.title("设置")
+        window.geometry("500x310")
+        window.minsize(460, 290)
+        window.transient(self)
+        frame = ttk.Frame(window, padding=18)
+        frame.pack(fill="both", expand=True)
+        choices = ttk.Frame(frame)
+        choices.pack(fill="x", pady=(0, 10))
+        for value, label in (("relay", "中转站"), ("deepseek", "DeepSeek")):
+            ttk.Radiobutton(choices, text=label, variable=self.mode, value=value,
+                            command=self.select_mode).pack(side="left", padx=(0, 22))
+        self.form = ttk.Frame(frame)
+        self.form.pack(fill="x")
+        self.form.columnconfigure(1, weight=1)
+        self.url_label = ttk.Label(self.form, text="中转站链接")
+        self.url_entry = ttk.Entry(self.form, textvariable=self.url)
+        self.key_label = ttk.Label(self.form, text="API 密钥")
+        self.key_entry = ttk.Entry(self.form, textvariable=self.key, show="•")
+        self.hint = ttk.Label(self.form, wraplength=420)
+        ttk.Button(frame, text="保存设置", command=self.save_settings).pack(fill="x", pady=(12, 0))
+        ttk.Button(frame, text="恢复上一次切换前的配置", command=self.restore).pack(fill="x", pady=(7, 0))
+        self.select_mode()
+        window.grab_set()
 
-    def select_kind(self, _event=None):
-        if self.kind.get() == "deepseek":
-            if not self.url.get().strip():
-                self.url.set("https://api.deepseek.com")
-            if not self.model.get().strip():
-                self.model.set("deepseek-chat")
-            self.status.set("DeepSeek 官方地址与模型可以自行修改；请填写自己的 API 密钥。")
-
-    def save(self):
+    def save_settings(self):
         try:
-            prior = self.profile_map.get(self.selection.get())
-            profile = new_profile(self.name_var.get(), self.kind.get(), self.url.get(), self.model.get(), self.allow_http.get(), self.codex_catalog.get())
-            if prior:
-                profile.id = prior.id
-            secret = self.key.get()
-            if secret:
-                self.vault.put(profile.id, secret)
-            elif not self.vault.get(profile.id):
-                raise ValueError("请填写密钥。")
-            profiles = [p for p in self.profiles if p.id != profile.id] + [profile]
-            self.store.save(profiles)
-            self.key.set("")
-            self.reload(f"{profile.name} [{profile.id[:8]}]")
-            self.status.set("服务已保存；密钥保存在系统凭据库。")
+            profile = self.prepare_profile()
         except Exception as exc:
-            messagebox.showerror("保存失败", str(exc))
+            messagebox.showerror("保存失败", str(exc), parent=self.settings_window)
+            return
+        self.settings_window.destroy()
+        self.settings_window = None
+        self.status.set(("中转站" if profile.kind == "responses" else "DeepSeek") + "已保存，请点击对应按钮启动。")
 
-    def delete(self):
-        p = self.profile_map.get(self.selection.get())
-        if p and messagebox.askyesno("删除服务", f"删除“{p.name}”及其保存的密钥？"):
-            try:
-                self.vault.delete(p.id)
-                self.store.save([item for item in self.profiles if item.id != p.id])
-                self.reload()
-                self.new()
-            except Exception as exc:
-                messagebox.showerror("删除失败", str(exc))
+    def existing(self, mode):
+        kind = "responses" if mode == "relay" else "deepseek"
+        return next((p for p in reversed(self.profiles) if p.kind == kind), None)
 
-    def start(self):
-        p = self.profile_map.get(self.selection.get())
-        personal, cli, desktop, isolate = self.personal_model.get(), self.cli_path.get(), self.desktop_path.get(), self.isolate_catalog.get()
-        self.launch_button.configure(state="disabled")
-        self.status.set("正在验证配置并启动，请稍候……")
+    def select_mode(self):
+        for widget in (self.url_label, self.url_entry, self.key_label, self.key_entry, self.hint):
+            widget.grid_forget()
+        self.key.set("")
+        mode = self.mode.get()
+        prior = self.existing(mode)
+        if mode == "relay":
+            self.url.set(prior.base_url if prior else "")
+            self.url_label.grid(row=0, column=0, sticky="w", padx=(0, 12), pady=5)
+            self.url_entry.grid(row=0, column=1, sticky="ew", pady=5)
+        self.key_label.grid(row=1, column=0, sticky="w", padx=(0, 12), pady=5)
+        self.key_entry.grid(row=1, column=1, sticky="ew", pady=5)
+        self.hint.configure(text="密钥已保存，留空可继续使用。" if prior else "密钥保存在本机系统凭据库。")
+        self.hint.grid(row=2, column=1, sticky="w", pady=(2, 0))
+
+    def prepare_profile(self):
+        mode = self.mode.get()
+        if mode == "personal":
+            return None
+        prior = self.existing(mode)
+        url = self.url.get().strip() if mode == "relay" else "https://api.deepseek.com"
+        # Explicit acknowledgement is needed before sending an API key over LAN HTTP.
+        allow_http = False
+        parsed = urlsplit(url)
+        if parsed.scheme == "http" and parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
+            allow_http = messagebox.askyesno("确认 HTTP 连接", "这个地址使用 HTTP，密钥会在网络中明文传输。仍要使用吗？")
+            if not allow_http:
+                raise ValueError("已取消 HTTP 连接。")
+        url = normalize_url(url, allow_http)
+        secret = self.key.get().strip()
+        if prior and prior.base_url != url and not secret:
+            raise ValueError("服务地址已改变，请重新填写对应的密钥。")
+        if not secret and prior:
+            secret = self.vault.get(prior.id) or ""
+        if not secret:
+            raise ValueError("请填写 API 密钥。")
+        profile = new_profile("中转站" if mode == "relay" else "DeepSeek",
+                              "responses" if mode == "relay" else "deepseek", url,
+                              "auto" if mode == "relay" else "deepseek-chat", allow_http)
+        if prior:
+            profile.id = prior.id
+        self.vault.put(profile.id, secret)
+        updated = [p for p in self.profiles if p.id != profile.id] + [profile]
+        self.store.save(updated)
+        self.profiles = updated
+        self.key.set("")
+        return profile
+
+    def launch_mode(self, mode):
+        if self.busy:
+            return
+        try:
+            profile = None if mode == "personal" else self.existing(mode)
+            if mode != "personal":
+                if profile is None or (mode == "deepseek" and profile.base_url != "https://api.deepseek.com") or not self.vault.get(profile.id):
+                    self.status.set("请先填写并保存" + ("中转站" if mode == "relay" else "DeepSeek") + "设置。")
+                    self.open_settings(mode)
+                    return
+                profile = dataclasses.replace(profile, model="auto" if mode == "relay" else "deepseek-chat",
+                                               codex_catalog=False)
+        except Exception as exc:
+            messagebox.showerror("无法启动", str(exc))
+            return
+        self.start(profile)
+
+    def start(self, profile, isolate=False):
+        if self.busy:
+            return
+        self.busy = True
+        self.active_profile = profile
+        for button in self.launch_buttons:
+            button.configure(state="disabled")
+        self.status.set("正在检查配置并启动，请稍候……")
         def worker():
             try:
-                child, adapter = launch(p, personal, cli, desktop, isolate)
+                _, adapter = launch(profile, "", "", "", isolate)
             except Exception as exc:
                 message = str(exc)
                 self.after(0, lambda: self.finish(None, message))
@@ -175,17 +181,27 @@ class Launcher(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def finish(self, adapter, error):
-        self.launch_button.configure(state="normal")
+        self.busy = False
+        for button in self.launch_buttons:
+            button.configure(state="normal")
         if error:
-            self.status.set("启动失败；请检查提示。")
+            self.status.set("启动失败，原有 Codex 配置未被覆盖。")
+            if "model_catalog_json" in error and messagebox.askyesno("发现旧模型目录", "旧配置中有自定义模型目录，可能与当前版本冲突。是否先备份原配置并隔离此目录后重试？"):
+                self.start(self.active_profile, isolate=True)
+                return
             messagebox.showerror("启动失败", error)
+            return
+        if adapter:
+            self.adapters.append(adapter)
+            self.status.set("已发出启动请求；使用 DeepSeek 期间请保持本窗口打开。")
         else:
-            if adapter:
-                self.adapters.append(adapter)
-            self.status.set("已发出启动请求。使用 Chat 适配器期间，请保持此窗口打开。")
+            self.status.set("已发出启动请求。")
 
     def close(self):
-        if self.adapters and not messagebox.askyesno("关闭适配器", "关闭启动器会停止本地 Chat 适配器，正在使用它的 Codex 请求会中断。继续吗？"):
+        if self.busy:
+            messagebox.showinfo("请稍候", "正在启动，请等待检查结束。")
+            return
+        if self.adapters and not messagebox.askyesno("关闭 DeepSeek", "关闭启动器会停止 DeepSeek 连接，正在进行的请求会中断。继续吗？"):
             return
         for adapter in self.adapters:
             adapter.__exit__(None, None, None)

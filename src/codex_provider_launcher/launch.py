@@ -11,7 +11,7 @@ from pathlib import Path
 import tomlkit
 
 from .adapter import ChatAdapter
-from .catalog import fetch, verify
+from .catalog import discover, fetch, verify
 from .config import atomic_write, candidate, commit
 from .platforms import ensure_windows_bridge, is_desktop_running, posix_bridge, windows_runtime
 from .probe import clean_env, validate
@@ -51,9 +51,20 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
     if profile is None and not personal_model.strip() and state_path.exists():
         state = json.loads(state_path.read_text(encoding="utf-8"))
         personal_model = state.get("model", "") if isinstance(state.get("model", ""), str) else ""
+    if profile is None and not personal_model.strip() and root.get("model_provider", "openai") != "openai":
+        models = validate(cli, b"")[3]["data"]
+        available = [m for m in models if not m.get("hidden") and m.get("id")]
+        default = next((m for m in available if m.get("isDefault")), available[0] if available else None)
+        if not default:
+            raise RuntimeError("无法确定个人账号模型，配置未修改。")
+        personal_model = default["id"]
     secret = CredentialStore().get(profile.id) if profile else None
     if profile and not secret:
         raise RuntimeError("未找到服务密钥，请先保存到系统凭据库。")
+    if profile and profile.kind == "responses" and profile.model == "auto":
+        preferred = str(root.get("model", ""))
+        selected, native = discover(profile, secret, cli, preferred)
+        profile = dataclasses.replace(profile, model=selected, codex_catalog=native)
     adapter = None
     try:
         active = profile

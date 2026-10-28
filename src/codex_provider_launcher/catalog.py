@@ -19,6 +19,50 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def discover(profile: Profile, key: str, cli: Path, preferred: str = "") -> tuple[str, bool]:
+    """Find an enabled model without asking the user for a model ID."""
+    version = subprocess.run([str(cli), "--version"], capture_output=True, text=True, timeout=10,
+                             env=clean_env(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    match = re.match(r"^codex-cli\s+(\S+)", version.stdout.strip())
+    if version.returncode or not match:
+        raise RuntimeError("无法读取 Codex 版本，未更改配置。")
+    url = profile.base_url + "/models?" + urllib.parse.urlencode({"client_version": match.group(1)})
+    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + key,
+        "x-opencodex-api-key": key, "Accept": "application/json"})
+    try:
+        with urllib.request.build_opener(NoRedirect()).open(req, timeout=20) as response:
+            raw = response.read(4 * 1024 * 1024 + 1)
+        if len(raw) > 4 * 1024 * 1024:
+            raise ValueError("模型列表过大。")
+        document = json.loads(raw)
+    except (OSError, ValueError) as exc:
+        raise RuntimeError("无法读取中转站的模型列表，请检查地址、密钥和服务是否支持 /models。配置未修改。") from exc
+    if not isinstance(document, dict):
+        raise ValueError("中转站返回的模型列表格式不受支持。")
+    native = isinstance(document.get("models"), list) and bool(document["models"])
+    items = document["models"] if native else document.get("data")
+    if not isinstance(items, list) or len(items) > 1000:
+        raise ValueError("中转站没有返回可用的模型列表，配置未修改。")
+    candidates = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("slug") if native else item.get("id")
+        visible = item.get("visibility") == "list" if native else not item.get("hidden", False)
+        if isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}", name) and visible:
+            candidates.append((name, item))
+    ids = {name for name, _ in candidates}
+    candidates = [(name, item) for name, item in candidates if not (name.endswith("--fast") and name[:-6] in ids)]
+    if not candidates:
+        raise ValueError("中转站没有可用的可见模型，配置未修改。")
+    if preferred and any(name == preferred for name, _ in candidates):
+        return preferred, native
+    for name, item in candidates:
+        if item.get("is_default") is True or item.get("isDefault") is True:
+            return name, native
+    return candidates[0][0], native
+
+
 def fetch(profile: Profile, key: str, cli: Path) -> tuple[Path, list[dict]]:
     version = subprocess.run([str(cli), "--version"], capture_output=True, text=True, timeout=10,
                              env=clean_env(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
