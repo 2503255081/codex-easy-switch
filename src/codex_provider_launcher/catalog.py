@@ -6,6 +6,9 @@ import copy
 import json
 import re
 import subprocess
+import socket
+import ssl
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -18,6 +21,33 @@ from .profiles import Profile, data_dir
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+def connection_error(exc: Exception) -> str:
+    """Describe network failures without echoing URLs, response bodies or keys."""
+    if isinstance(exc, urllib.error.HTTPError):
+        code = exc.code
+        if code in (401, 403):
+            return f"服务返回 HTTP {code}，请检查密钥及其访问权限。"
+        if code == 404:
+            return "服务返回 HTTP 404，请检查中转站地址是否包含正确的 API 路径。"
+        if code == 429:
+            return "服务返回 HTTP 429，请检查调用频率或额度。"
+        if code >= 500:
+            return f"服务或公网链路返回 HTTP {code}，请检查中转站及其公网连接。"
+        return f"服务返回 HTTP {code}，请检查地址和服务配置。"
+    reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+    if isinstance(reason, (TimeoutError, socket.timeout)):
+        return "连接超时，请检查网络或中转站响应速度后重试。"
+    if isinstance(reason, socket.gaierror):
+        return "域名解析失败，请检查网络和 DNS。"
+    if isinstance(reason, ssl.SSLError):
+        return "HTTPS 证书或加密连接失败，请检查系统时间和证书。"
+    if isinstance(reason, ConnectionRefusedError):
+        return "连接被拒绝，请检查中转站服务是否运行。"
+    if isinstance(reason, (ConnectionResetError, ConnectionAbortedError)):
+        return "连接被中断，请检查网络或中转站服务。"
+    return "网络连接失败，请检查网络、代理设置和中转站地址。"
 
 
 def deepseek_catalog() -> tuple[Path, list[dict]]:
@@ -63,13 +93,15 @@ def list_models(profile: Profile, key: str, cli: Path) -> tuple[list[tuple[str, 
     req = urllib.request.Request(url, headers={"Authorization": "Bearer " + key,
         "x-opencodex-api-key": key, "Accept": "application/json"})
     try:
-        with urllib.request.build_opener(NoRedirect()).open(req, timeout=20) as response:
+        with urllib.request.build_opener(NoRedirect()).open(req, timeout=30) as response:
             raw = response.read(4 * 1024 * 1024 + 1)
         if len(raw) > 4 * 1024 * 1024:
             raise ValueError("模型列表过大。")
         document = json.loads(raw)
-    except (OSError, ValueError) as exc:
-        raise RuntimeError("无法读取中转站的模型列表，请检查地址、密钥和服务是否支持 /models。配置未修改。") from exc
+    except (urllib.error.URLError, OSError) as exc:
+        raise RuntimeError("无法读取模型列表：" + connection_error(exc) + " 配置未修改。") from exc
+    except ValueError as exc:
+        raise RuntimeError("模型列表格式无效或过大，配置未修改。") from exc
     if not isinstance(document, dict):
         raise ValueError("中转站返回的模型列表格式不受支持。")
     native = isinstance(document.get("models"), list) and bool(document["models"])
@@ -109,8 +141,11 @@ def fetch(profile: Profile, key: str, cli: Path) -> tuple[Path, list[dict]]:
         raise RuntimeError("无法读取当前 Codex CLI 版本，模型列表未更改。")
     url = profile.base_url + "/models?" + urllib.parse.urlencode({"client_version": match.group(1)})
     req = urllib.request.Request(url, headers={"Authorization": "Bearer " + key, "x-opencodex-api-key": key, "Accept": "application/json"})
-    with urllib.request.build_opener(NoRedirect()).open(req, timeout=20) as response:
-        raw = response.read(4 * 1024 * 1024 + 1)
+    try:
+        with urllib.request.build_opener(NoRedirect()).open(req, timeout=30) as response:
+            raw = response.read(4 * 1024 * 1024 + 1)
+    except (urllib.error.URLError, OSError) as exc:
+        raise RuntimeError("读取模型目录失败：" + connection_error(exc) + " 配置未修改。") from exc
     if len(raw) > 4 * 1024 * 1024:
         raise ValueError("服务返回的模型目录过大。")
     models = json.loads(raw).get("models")

@@ -244,8 +244,10 @@ class Launcher(tk.Tk):
                     self.connection_status.set("设置已更改，请重新测试。")
                     return
                 if error:
+                    logger().warning("relay connection test failed: %s", error)
                     self.connection_status.set("连接失败：" + error)
                 else:
+                    logger().info("relay connection test succeeded models=%s", len(names))
                     self.model_details = dict(models)
                     self.model_entry.configure(values=("自动（服务推荐）", "上次使用（无记录时自动）", *names))
                     self.update_efforts()

@@ -13,6 +13,17 @@ from codex_provider_launcher.profiles import new_profile
 
 
 class CatalogTests(unittest.TestCase):
+    def test_connection_errors_are_actionable_and_do_not_expose_response_content(self):
+        import socket
+        import urllib.error
+        for code, expected in [(401, "密钥"), (403, "权限"), (404, "路径"), (429, "额度"), (530, "公网")]:
+            exc = urllib.error.HTTPError("https://secret.example", code, "fixture-secret", {}, None)
+            text = catalog.connection_error(exc)
+            self.assertIn(expected, text)
+            self.assertNotIn("fixture-secret", text)
+            self.assertNotIn("secret.example", text)
+        self.assertIn("超时", catalog.connection_error(urllib.error.URLError(TimeoutError())))
+        self.assertIn("域名解析", catalog.connection_error(urllib.error.URLError(socket.gaierror())))
     def test_deepseek_catalog_uses_current_schema_template(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
