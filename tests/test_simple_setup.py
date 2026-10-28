@@ -54,7 +54,7 @@ class SimpleSetupTests(unittest.TestCase):
         obj = self.setup("deepseek", key="fixture-key")
         profile = Launcher.prepare_profile(obj)
         self.assertEqual(profile.base_url, "https://api.deepseek.com")
-        self.assertEqual(profile.model, "deepseek-chat")
+        self.assertEqual(profile.model, "deepseek-flash")
         self.assertEqual(Launcher.prepare_profile(obj).id, profile.id)
 
     def test_main_buttons_launch_or_open_settings(self):

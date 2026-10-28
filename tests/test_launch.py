@@ -55,3 +55,28 @@ class LaunchTests(unittest.TestCase):
                 self.assertNotIn("CODEX_LAUNCHER_API_KEY", captured[-1])
                 self.assertEqual(personal["projects"]["c:/fixture"]["trust_level"], "trusted")
                 self.assertEqual(auth.read_bytes(), b'fixture-only-auth')
+
+    def test_legacy_deepseek_uses_native_api_without_chat_adapter(self):
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as d, ExitStack() as stack:
+            root = Path(d)
+            (root / "config.toml").write_text('model="personal-model"\n')
+            legacy = new_profile("DeepSeek", "deepseek", "https://api.deepseek.com", "deepseek-chat")
+            stack.enter_context(patch.dict(os.environ, {"CODEX_HOME": str(root)}))
+            for name, value in {"is_desktop_running": False, "windows_runtime": (root / "app", root / "cli"),
+                                "ensure_windows_bridge": root / "bridge", "data_dir": root / "data",
+                                "deepseek_catalog": (root / "catalog.json", None), "validate": {}}.items():
+                stack.enter_context(patch.object(launch, name, return_value=value))
+            stack.enter_context(patch.object(launch.CredentialStore, "get", return_value="fixture-key"))
+            chat = stack.enter_context(patch.object(launch, "ChatAdapter"))
+            popen = stack.enter_context(patch.object(launch.subprocess, "Popen"))
+            _, adapter = launch.launch(legacy, "", "", "")
+            chat.assert_not_called()
+            self.assertIsNone(adapter)
+            config = tomlkit.parse((root / "config.toml").read_text())
+            self.assertEqual(config["model"], "deepseek-flash")
+            provider = config["model_providers"]["launcher_custom"]
+            self.assertEqual(provider["base_url"], "https://api.deepseek.com")
+            self.assertEqual(provider["wire_api"], "responses")
+            self.assertEqual(popen.call_args.kwargs["env"]["CODEX_LAUNCHER_API_KEY"], "fixture-key")
+            self.assertEqual(popen.call_args.kwargs["env"]["CODEX_SWITCH_FIXED_MODEL"], "deepseek-flash")

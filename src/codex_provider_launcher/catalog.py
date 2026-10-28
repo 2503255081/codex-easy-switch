@@ -31,11 +31,14 @@ def deepseek_catalog() -> tuple[Path, list[dict]]:
     except (OSError, ValueError, TypeError, StopIteration) as exc:
         raise RuntimeError("找不到可用的 Codex 原生模型目录。请先用个人账号正常启动一次 Codex 后重试。") from exc
     model = copy.deepcopy(template)
-    model.update(slug="deepseek-chat", display_name="DeepSeek Chat", description="DeepSeek 官方 API（通过本地适配器）",
-                 visibility="list", priority=0, default_reasoning_level="low", context_window=64000,
-                 max_context_window=64000, input_modalities=["text"], additional_speed_tiers=[],
-                 service_tiers=[], availability_nux=None, upgrade=None)
-    model["supported_reasoning_levels"] = [{"effort": "low", "description": "默认"}]
+    model.update(slug="deepseek-flash", display_name="DeepSeek Flash", description="DeepSeek 官方原生 Responses API",
+                 visibility="list", priority=0, default_reasoning_level="low", context_window=1048576,
+                 max_context_window=1048576, input_modalities=["text", "image"], additional_speed_tiers=[],
+                 service_tiers=[], availability_nux=None, upgrade=None, prefer_websockets=False,
+                 apply_patch_tool_type="freeform", supports_parallel_tool_calls=True,
+                 tool_mode=None, use_responses_lite=False, experimental_supported_tools=[],
+                 supports_image_detail_original=True, auto_compact_token_limit=None)
+    model["supported_reasoning_levels"] = [{"effort": e, "description": e} for e in ("low", "high", "max")]
     models = [model]
     raw = json.dumps({"models": models}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     path = data_dir() / "catalogs" / ("catalog-" + hashlib.sha256(raw).hexdigest() + ".json")

@@ -18,9 +18,9 @@ class BridgeTests(unittest.TestCase):
     def test_deepseek_overrides_old_thread_and_turn_models(self):
         for method in ("thread/start", "thread/resume", "thread/fork", "turn/start"):
             original = {"id": 1, "method": method, "params": {"model": "gpt-6.1-sol", "config": {"model": "old"}}}
-            result = json.loads(rewrite((json.dumps(original) + "\n").encode(), "launcher_custom", "deepseek-chat"))
-            self.assertEqual(result["params"]["model"], "deepseek-chat")
-            self.assertEqual(result["params"]["config"]["model"], "deepseek-chat")
+            result = json.loads(rewrite((json.dumps(original) + "\n").encode(), "launcher_custom", "deepseek-flash"))
+            self.assertEqual(result["params"]["model"], "deepseek-flash")
+            self.assertEqual(result["params"]["config"]["model"], "deepseek-flash")
             if method != "turn/start":
                 self.assertEqual(result["params"]["modelProvider"], "launcher_custom")
 

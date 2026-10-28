@@ -2,7 +2,7 @@
 
 一个跨平台的本地 Codex 启动器，供用户在个人账号和自定义 API 服务之间切换。服务地址、模型和密钥由使用者自行提供，项目不包含预设中转站或账号。
 
-**目前是实验版本。** Windows 图形界面、隔离配置校验和模拟协议转换已测试；Linux 在 WSL 中通过核心测试；macOS 桌面启动、真实 DeepSeek 请求和完整的桌面切换尚未验证。请先备份配置和聊天数据，不要把它用于无法中断的工作。
+**目前是实验版本。** Windows 图形界面、隔离配置校验和模拟协议转换已测试；Linux 在 WSL 中通过核心测试；DeepSeek 原生 Responses 的流式和同名命名空间工具调用已实测；macOS 桌面启动和完整的桌面切换尚未验证。请先备份配置和聊天数据，不要把它用于无法中断的工作。
 
 ## 适用场景：个人额度用完后继续工作
 
@@ -18,8 +18,8 @@
 ## 主要功能
 
 - 个人账号直接启动；中转站只需填写地址和密钥，DeepSeek 只需填写密钥。
-- DeepSeek 的 Chat Completions API 通过本机 LiteLLM 适配；本机代理只监听 `127.0.0.1` 并设置随机访问密钥。上游必须支持所需的流式、工具调用及其他能力，不能保证所有模型和服务都兼容 Codex。
-- DeepSeek 模式使用 `deepseek-chat`，并为桌面端生成经当前 Codex CLI 验证的模型目录；启动或继续对话时固定使用该模型。切回个人账号或中转站时恢复各自的模型选择。
+- DeepSeek 按[官方 Codex 接入文档](https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/codex)直连原生 Responses API，保留命名空间和工具调用，不再经过 LiteLLM。普通 Chat Completions 服务仍可使用本机 LiteLLM 适配。
+- DeepSeek 模式使用 `deepseek-flash`，并为桌面端生成经当前 Codex CLI 验证的模型目录；启动或继续对话时固定使用该模型。切回个人账号或中转站时恢复各自的模型选择。
 - 若本机已登录个人 ChatGPT 账号，切换到中转站或 DeepSeek 时保留 Codex 桌面端的账号身份和右下角个人额度显示；中转请求仍使用该服务的 API 密钥。个人额度不代表中转站或 DeepSeek 的余额。
 - API 密钥使用系统凭据库；非本机 HTTP 默认禁用。服务地址只保存在本机配置文件中。
 - 切换前通过实际 Codex CLI 在临时目录检查配置，备份原始配置，检测并发编辑；可在启动器中恢复上次配置。聊天和账号文件不会被主动改写。

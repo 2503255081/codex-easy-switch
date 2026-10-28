@@ -44,10 +44,10 @@ class NativeBridgeTests(unittest.TestCase):
             with patch("codex_provider_launcher.platforms.data_dir", return_value=root):
                 bridge = ensure_windows_bridge()
             env = os.environ.copy()
-            env.update(CODEX_SWITCH_REAL_CLI=str(target), CODEX_SWITCH_PROVIDER="launcher_custom", CODEX_SWITCH_FIXED_MODEL="deepseek-chat")
+            env.update(CODEX_SWITCH_REAL_CLI=str(target), CODEX_SWITCH_PROVIDER="launcher_custom", CODEX_SWITCH_FIXED_MODEL="deepseek-flash")
             env.pop("CODEX_SWITCH_LOG", None)
             lines = [{"id": i, "method": method, "params": {"model": "gpt-6.1-sol"}}
                      for i, method in enumerate(("thread/resume", "turn/start"), 1)]
             result = subprocess.run([str(bridge), "app-server"], input="".join(json.dumps(x)+"\n" for x in lines), text=True, capture_output=True, timeout=20, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual([json.loads(line)["params"]["model"] for line in result.stdout.splitlines()], ["deepseek-chat", "deepseek-chat"])
+            self.assertEqual([json.loads(line)["params"]["model"] for line in result.stdout.splitlines()], ["deepseek-flash", "deepseek-flash"])

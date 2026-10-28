@@ -82,7 +82,12 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
     adapter = None
     try:
         active = profile
-        if profile and profile.kind in ("deepseek", "openai_chat"):
+        if profile and profile.kind == "deepseek":
+            # Normalize saved legacy profiles without changing their credential IDs.
+            profile = dataclasses.replace(profile, base_url="https://api.deepseek.com", model="deepseek-flash", codex_catalog=False)
+            active = dataclasses.replace(profile, kind="responses")
+            logger().info("DeepSeek native Responses API selected model=deepseek-flash")
+        if profile and profile.kind == "openai_chat":
             adapter = ChatAdapter(profile, secret)
             adapter.__enter__()
             logger().info("local Chat adapter ready")

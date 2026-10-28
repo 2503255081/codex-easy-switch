@@ -64,7 +64,7 @@ public class ProviderBridge {
         if(!thread && !turn)return line;
         string fixedModel=Environment.GetEnvironmentVariable("CODEX_SWITCH_FIXED_MODEL");
         if(!thread && (string.IsNullOrEmpty(fixedModel) || provider!="launcher_custom"))return line;
-        if(!string.IsNullOrEmpty(fixedModel) && (provider!="launcher_custom" || fixedModel!="deepseek-chat"))throw new Exception("Invalid fixed model.");
+        if(!string.IsNullOrEmpty(fixedModel) && (provider!="launcher_custom" || fixedModel!="deepseek-flash"))throw new Exception("Invalid fixed model.");
         var p=obj.ContainsKey("params")?obj["params"] as Dictionary<string,object>:null;
         if(p==null){p=new Dictionary<string,object>();obj["params"]=p;}
         if(thread)p["modelProvider"]=provider;

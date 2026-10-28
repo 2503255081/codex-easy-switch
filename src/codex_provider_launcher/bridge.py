@@ -13,7 +13,7 @@ def rewrite(line: bytes, provider: str, fixed_model: str = "") -> bytes:
         obj = json.loads(line)
         if not isinstance(obj, dict) or obj.get("method") not in ("thread/start", "thread/resume", "thread/fork", "turn/start"):
             return line
-        if fixed_model and (provider != "launcher_custom" or fixed_model != "deepseek-chat"):
+        if fixed_model and (provider != "launcher_custom" or fixed_model != "deepseek-flash"):
             raise ValueError("invalid fixed model")
         is_thread = obj.get("method") != "turn/start"
         if not is_thread and not fixed_model:

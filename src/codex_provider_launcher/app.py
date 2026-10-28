@@ -180,7 +180,7 @@ class Launcher(tk.Tk):
             raise ValueError("请填写 API 密钥。")
         profile = new_profile("中转站" if mode == "relay" else "DeepSeek",
                               "responses" if mode == "relay" else "deepseek", url,
-                              "auto" if mode == "relay" else "deepseek-chat", allow_http)
+                              "auto" if mode == "relay" else "deepseek-flash", allow_http)
         if prior:
             profile.id = prior.id
         self.vault.put(profile.id, secret)
@@ -201,7 +201,7 @@ class Launcher(tk.Tk):
                     self.status.set("请先填写并保存" + ("中转站" if mode == "relay" else "DeepSeek") + "设置。")
                     self.open_settings(mode)
                     return
-                profile = dataclasses.replace(profile, model="auto" if mode == "relay" else "deepseek-chat",
+                profile = dataclasses.replace(profile, model="auto" if mode == "relay" else "deepseek-flash",
                                                codex_catalog=False)
         except Exception as exc:
             logger().error("launch preparation failed: %s", exc)
@@ -242,7 +242,7 @@ class Launcher(tk.Tk):
             return
         if adapter:
             self.adapters.append(adapter)
-            self.status.set("已发出启动请求；使用 DeepSeek 期间请保持本窗口打开。")
+            self.status.set("已发出启动请求；使用本地协议适配器期间请保持本窗口打开。")
         else:
             self.status.set("已发出启动请求。")
         logger().info("launch action completed")
@@ -251,7 +251,7 @@ class Launcher(tk.Tk):
         if self.busy:
             messagebox.showinfo("请稍候", "正在启动，请等待检查结束。")
             return
-        if self.adapters and not messagebox.askyesno("关闭 DeepSeek", "关闭启动器会停止 DeepSeek 连接，正在进行的请求会中断。继续吗？"):
+        if self.adapters and not messagebox.askyesno("关闭本地适配器", "关闭启动器会停止本地适配连接，正在进行的请求会中断。继续吗？"):
             return
         for adapter in self.adapters:
             adapter.__exit__(None, None, None)
