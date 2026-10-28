@@ -15,6 +15,7 @@ import urllib.request
 from pathlib import Path
 
 from .probe import clean_env
+from .diagnostics import protect
 from .profiles import Profile
 
 
@@ -31,6 +32,8 @@ class ChatAdapter:
         self.process = None
         self.temp = None
         self.master = "sk-" + secrets.token_hex(32)
+        protect(secret)
+        protect(self.master)
         self.url = None
 
     def __enter__(self):

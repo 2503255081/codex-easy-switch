@@ -100,9 +100,14 @@ class CredentialStore:
 
     def get(self, profile_id: str) -> str | None:
         self._check()
-        return keyring.get_password(SERVICE, profile_id)
+        secret = keyring.get_password(SERVICE, profile_id)
+        from .diagnostics import protect
+        protect(secret)
+        return secret
 
     def put(self, profile_id: str, secret: str) -> None:
+        from .diagnostics import protect
+        protect(secret)
         self._check()
         if not secret or any(c.isspace() for c in secret):
             raise ValueError("密钥不能为空或包含空白字符。")

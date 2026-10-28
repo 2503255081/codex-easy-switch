@@ -7,9 +7,11 @@ import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
+from tkinter.scrolledtext import ScrolledText
 from urllib.parse import urlsplit
 
 from .config import restore_last
+from .diagnostics import logger, log_path, read_logs, redact
 from .launch import launch
 from .platforms import is_desktop_running
 from .profiles import CredentialStore, ProfileStore, data_dir, new_profile, normalize_url
@@ -32,6 +34,8 @@ class Launcher(tk.Tk):
         self.status = tk.StringVar(value="请选择一种方式启动 Codex。")
         self.settings_window = None
         self.active_profile = None
+        self.log_window = None
+        logger().info("launcher opened")
         self.protocol("WM_DELETE_WINDOW", self.close)
 
         outer = ttk.Frame(self, padding=20)
@@ -40,6 +44,7 @@ class Launcher(tk.Tk):
         header.pack(fill="x")
         ttk.Label(header, text="Codex 启动器", font=("TkDefaultFont", 17, "bold")).pack(side="left")
         ttk.Button(header, text="⚙ 设置", command=self.open_settings).pack(side="right")
+        ttk.Button(header, text="日志", command=self.open_logs).pack(side="right", padx=(0, 6))
         ttk.Label(outer, text="选择使用方式，然后启动 Codex。", wraplength=480).pack(anchor="w", pady=(3, 14))
         self.launch_buttons = []
         for mode, label in (("personal", "个人账号"), ("relay", "中转站"), ("deepseek", "DeepSeek")):
@@ -50,7 +55,46 @@ class Launcher(tk.Tk):
         try:
             self.profiles = self.store.load()
         except Exception as exc:
+            logger().error("profile loading failed: %s", exc)
             messagebox.showerror("无法读取服务设置", str(exc))
+
+    def open_logs(self):
+        if self.log_window is not None and self.log_window.winfo_exists():
+            self.log_window.lift()
+            return
+        window = tk.Toplevel(self)
+        self.log_window = window
+        window.title("启动器日志")
+        window.geometry("820x500")
+        outer = ttk.Frame(window, padding=12)
+        outer.pack(fill="both", expand=True)
+        ttk.Label(outer, text="启动检查和报错记录（密钥已过滤）").pack(anchor="w")
+        output = ScrolledText(outer, wrap="word", font=("TkFixedFont", 10))
+        output.pack(fill="both", expand=True, pady=8)
+        def refresh():
+            try:
+                value = read_logs()
+            except OSError as exc:
+                value = "读取日志失败：" + redact(str(exc))
+            output.configure(state="normal")
+            output.delete("1.0", "end")
+            output.insert("1.0", value)
+            output.configure(state="disabled")
+            output.see("end")
+        def copy():
+            self.clipboard_clear()
+            self.clipboard_append(output.get("1.0", "end-1c"))
+        buttons = ttk.Frame(outer)
+        buttons.pack(fill="x")
+        ttk.Button(buttons, text="刷新", command=refresh).pack(side="left")
+        ttk.Button(buttons, text="复制日志", command=copy).pack(side="left", padx=6)
+        ttk.Label(outer, text=str(log_path()), wraplength=780).pack(anchor="w", pady=(8, 0))
+        refresh()
+
+    def report_callback_exception(self, exc_type, value, tb):
+        import traceback
+        logger().error("GUI callback failed: %s", "".join(traceback.format_exception(exc_type, value, tb)))
+        messagebox.showerror("操作失败", "发生错误，请点击右上角“日志”查看详细记录。")
 
     def open_settings(self, mode="relay"):
         if self.settings_window is not None and self.settings_window.winfo_exists():
@@ -87,6 +131,7 @@ class Launcher(tk.Tk):
         try:
             profile = self.prepare_profile()
         except Exception as exc:
+            logger().error("settings save failed: %s", exc)
             messagebox.showerror("保存失败", str(exc), parent=self.settings_window)
             return
         self.settings_window.destroy()
@@ -142,6 +187,7 @@ class Launcher(tk.Tk):
         updated = [p for p in self.profiles if p.id != profile.id] + [profile]
         self.store.save(updated)
         self.profiles = updated
+        logger().info("settings saved kind=%s", profile.kind)
         self.key.set("")
         return profile
 
@@ -158,6 +204,7 @@ class Launcher(tk.Tk):
                 profile = dataclasses.replace(profile, model="auto" if mode == "relay" else "deepseek-chat",
                                                codex_catalog=False)
         except Exception as exc:
+            logger().error("launch preparation failed: %s", exc)
             messagebox.showerror("无法启动", str(exc))
             return
         self.start(profile)
@@ -174,6 +221,8 @@ class Launcher(tk.Tk):
             try:
                 _, adapter = launch(profile, "", "", "", isolate)
             except Exception as exc:
+                import traceback
+                logger().error("launch failed: %s", traceback.format_exc())
                 message = str(exc)
                 self.after(0, lambda: self.finish(None, message))
             else:
@@ -196,6 +245,7 @@ class Launcher(tk.Tk):
             self.status.set("已发出启动请求；使用 DeepSeek 期间请保持本窗口打开。")
         else:
             self.status.set("已发出启动请求。")
+        logger().info("launch action completed")
 
     def close(self):
         if self.busy:
@@ -205,6 +255,7 @@ class Launcher(tk.Tk):
             return
         for adapter in self.adapters:
             adapter.__exit__(None, None, None)
+        logger().info("launcher closed")
         self.destroy()
 
     def restore(self):
@@ -215,8 +266,10 @@ class Launcher(tk.Tk):
                 raise RuntimeError("请先正常退出 Codex Desktop，避免覆盖它正在使用的配置。")
             home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
             restore_last(home / "config.toml", data_dir() / "backups")
+            logger().info("previous configuration restored")
             self.status.set("已恢复上次切换前的配置。")
         except Exception as exc:
+            logger().error("configuration restore failed: %s", exc)
             messagebox.showerror("恢复失败", str(exc))
 
 

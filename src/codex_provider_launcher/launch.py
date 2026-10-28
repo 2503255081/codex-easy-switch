@@ -11,6 +11,7 @@ from pathlib import Path
 import tomlkit
 
 from .adapter import ChatAdapter
+from .diagnostics import logger
 from .catalog import discover, fetch, verify
 from .config import atomic_write, candidate, commit
 from .platforms import ensure_windows_bridge, is_desktop_running, posix_bridge, windows_runtime
@@ -19,6 +20,7 @@ from .profiles import CredentialStore, Profile, data_dir
 
 
 def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_path: str, isolate_catalog: bool = False):
+    logger().info("launch requested mode=%s isolate_catalog=%s", profile.kind if profile else "personal", isolate_catalog)
     if is_desktop_running():
         raise RuntimeError("请先正常退出所有 Codex Desktop 窗口，然后再次启动；未修改配置。")
     if os.name == "nt":
@@ -44,6 +46,7 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
     config_home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
     config_path = config_home / "config.toml"
     original = config_path.read_bytes() if config_path.exists() else None
+    logger().info("Codex runtime resolved; reading configuration")
     root = tomlkit.parse((original or b"").decode("utf-8-sig"))
     state_path = data_dir() / "personal-model.json"
     if profile and root.get("model_provider", "openai") == "openai" and isinstance(root.get("model"), str):
@@ -64,6 +67,7 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
     if profile and profile.kind == "responses" and profile.model == "auto":
         preferred = str(root.get("model", ""))
         selected, native = discover(profile, secret, cli, preferred)
+        logger().info("relay model selected model=%s native_catalog=%s", selected, native)
         profile = dataclasses.replace(profile, model=selected, codex_catalog=native)
     adapter = None
     try:
@@ -71,6 +75,7 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
         if profile and profile.kind in ("deepseek", "openai_chat"):
             adapter = ChatAdapter(profile, secret)
             adapter.__enter__()
+            logger().info("local Chat adapter ready")
             active = dataclasses.replace(profile, kind="responses", base_url=adapter.url)
             secret = adapter.master
         catalog_path, catalog_models = None, None
@@ -86,12 +91,15 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
         if secret:
             env["CODEX_LAUNCHER_API_KEY"] = secret
         def check(value):
+            logger().info("validating candidate in isolated Codex home")
             result = validate(cli, value)
             if catalog_models is not None:
                 verify(catalog_models, result)
         commit(config_path, original, proposed, data_dir() / "backups", check)
+        logger().info("configuration validated and saved; recovery record created")
         try:
             child = subprocess.Popen(command, env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            logger().info("Codex launch process created pid=%s", getattr(child, "pid", "unknown"))
         except BaseException:
             # Restore only if nobody changed the candidate after commit.
             if config_path.exists() and config_path.read_bytes() == proposed:
