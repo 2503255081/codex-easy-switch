@@ -48,12 +48,20 @@ def gui_self_test(report):
             app.update()
             app.open_settings("relay")
             app.update()
-            if len(app.launch_buttons) != 3:
-                raise RuntimeError("unexpected launch button count")
+            if len(app.launch_buttons) != 1 or str(app.launch_buttons[0].cget("text")) != "个人账号":
+                raise RuntimeError("unexpected initial launch buttons")
             if str(app.test_button.cget("text")) != "测试连接并获取模型":
                 raise RuntimeError("connection test button not available")
             if str(app.effort_entry.cget("state")) != "readonly":
                 raise RuntimeError("reasoning selector is not readonly")
+            for mode, expected in (("doubao", ("minimal", "low", "medium", "high")),
+                                   ("qwen", ("none", "low", "medium", "xhigh")),
+                                   ("qianwen", ("none", "low", "medium", "xhigh"))):
+                app.mode.set(mode)
+                app.select_mode()
+                choices = tuple(app.effort_entry.cget("values"))
+                if choices != ("跟随当前设置", *expected):
+                    raise RuntimeError("unexpected reasoning options for " + mode)
             Path(report).write_text(json.dumps({"ok": True, "gui": True}), encoding="utf-8")
         finally:
             app.destroy()

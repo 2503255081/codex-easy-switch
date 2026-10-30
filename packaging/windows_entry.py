@@ -33,6 +33,34 @@ def self_test(report):
             app.open_settings("relay")
             app.update_idletasks()
             assert app.test_button.cget("text") == "测试连接并获取模型"
+            app.mode.set("doubao")
+            app.select_mode()
+            assert app.model_choice.get().startswith("doubao-")
+            assert "doubao-seed-2-0-mini" in app.more_models.get()
+            app.plan.set("Coding Plan")
+            app.select_plan()
+            assert "glm-5.3" in app.more_models.get()
+            assert app.test_button.cget("text") == "测试模型（可能产生费用）"
+            app.mode.set("qwen")
+            app.select_mode()
+            assert app.url_label.cget("text") == "工作空间 ID（可选）"
+            app.mode.set("qianwen")
+            app.select_mode()
+            assert app.model_choice.get() == "qwen3.8-max"
+            assert "qwen3.8-flash" in app.more_models.get()
+            assert app.key_link.cget("text") == "千问 AI 密钥页 ↗"
+            app.mode.set("deepseek")
+            app.select_mode()
+            assert tuple(app.model_entry.cget("values")) == ("deepseek-flash", "deepseek-v4-pro")
+            app.mode.set("qwen")
+            app.select_mode()
+            assert app.key_link.cget("text") == "百炼密钥页 ↗"
+            assert app.fetch_models_button.cget("text") == "读取授权模型"
+            assert "qwen3.8-flash" in app.more_models.get()
+            app.mode.set("relay")
+            app.select_mode()
+            assert app.name_label.cget("text") == "按钮名称"
+            assert app.custom_picker.current() == 0
             bridge = ensure_windows_bridge()
             assert bridge.read_bytes().startswith(b"MZ")
             assert Path(directory) in bridge.parents

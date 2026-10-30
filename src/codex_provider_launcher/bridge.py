@@ -9,13 +9,15 @@ import sys
 import threading
 
 
-def rewrite(line: bytes, provider: str, fixed_model: str = "") -> bytes:
+def rewrite(line: bytes, provider: str, fixed_model: str = "", allowed_models: list[str] | None = None) -> bytes:
     try:
         obj = json.loads(line)
         if not isinstance(obj, dict) or obj.get("method") not in ("thread/start", "thread/resume", "thread/fork", "turn/start"):
             return line
-        if fixed_model and (provider != "launcher_custom" or fixed_model != "deepseek-flash"):
+        if fixed_model and (provider != "launcher_custom" or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}", fixed_model)):
             raise ValueError("invalid fixed model")
+        if allowed_models is not None and (not isinstance(allowed_models, list) or len(allowed_models) > 100 or any(not isinstance(x, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}", x) for x in allowed_models) or fixed_model not in allowed_models):
+            raise ValueError("invalid allowed models")
         is_thread = obj.get("method") != "turn/start"
         params = obj.setdefault("params", {})
         if not isinstance(params, dict):
@@ -36,7 +38,8 @@ def rewrite(line: bytes, provider: str, fixed_model: str = "") -> bytes:
         if not is_thread and not fixed_model:
             return line
         if fixed_model and (selected is not None or is_thread):
-            selected = selected if selected in ("deepseek-flash", "deepseek-v4-pro") else fixed_model
+            allowed = allowed_models if allowed_models is not None else (("deepseek-flash", "deepseek-v4-pro") if fixed_model == "deepseek-flash" else (fixed_model,))
+            selected = selected if selected in allowed else fixed_model
             params["model"] = selected
         if isinstance(params.get("config"), dict):
             if is_thread:
@@ -70,7 +73,7 @@ def main():
         try:
             if server:
                 for line in sys.stdin.buffer:
-                    process.stdin.write(rewrite(line, provider, os.environ.get("CODEX_SWITCH_FIXED_MODEL", "")))
+                    process.stdin.write(rewrite(line, provider, os.environ.get("CODEX_SWITCH_FIXED_MODEL", ""), json.loads(os.environ["CODEX_SWITCH_ALLOWED_MODELS"]) if os.environ.get("CODEX_SWITCH_ALLOWED_MODELS") else None))
                     process.stdin.flush()
             else:
                 copy(sys.stdin.buffer, process.stdin)

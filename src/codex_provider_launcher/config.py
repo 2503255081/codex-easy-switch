@@ -16,7 +16,7 @@ PROVIDER = "launcher_custom"
 CONFLICTS = ("profile", "model_catalog_json", "openai_base_url", "forced_login_method")
 
 
-def candidate(original: bytes, profile: Profile | None, personal_model: str | None = None, catalog: Path | None = None, isolate_catalog: bool = False, personal_auth: bool = False, deepseek: bool = False) -> bytes:
+def candidate(original: bytes, profile: Profile | None, personal_model: str | None = None, catalog: Path | None = None, isolate_catalog: bool = False, personal_auth: bool = False, deepseek: bool = False, extra_efforts: tuple[str, ...] = ()) -> bytes:
     """Generate a candidate. Unrecognized overrides are kept and stop switching."""
     doc = tomlkit.parse(original.decode("utf-8-sig"))
     if "model_catalog_json" in doc:
@@ -63,13 +63,14 @@ def candidate(original: bytes, profile: Profile | None, personal_model: str | No
         doc["model_providers"][PROVIDER] = entry
         if catalog is not None:
             doc["model_catalog_json"] = str(catalog)
-    if deepseek:
+    if deepseek or extra_efforts:
         # Desktop filters the model catalog against this separate effort allowlist.
         desktop = doc.setdefault("desktop", tomlkit.table())
         efforts = desktop.get("enabled-reasoning-efforts", ["low", "medium", "high", "xhigh", "ultra", "max"])
         if not isinstance(efforts, list) or any(not isinstance(e, str) for e in efforts):
             raise ValueError("desktop.enabled-reasoning-efforts 格式不受支持。")
-        desktop["enabled-reasoning-efforts"] = list(dict.fromkeys([*efforts, "none", "low", "high", "max"]))
+        additions = ("none", "low", "high", "max") if deepseek else ()
+        desktop["enabled-reasoning-efforts"] = list(dict.fromkeys([*efforts, *additions, *extra_efforts]))
     return tomlkit.dumps(doc).encode("utf-8")
 
 

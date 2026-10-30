@@ -59,3 +59,19 @@ class NativeBridgeTests(unittest.TestCase):
             self.assertEqual([m.get("model") for m in messages], ["deepseek-flash", "deepseek-flash", "deepseek-v4-pro", None])
             self.assertEqual(messages[2]["effort"], "max")
             self.assertEqual(messages[2]["config"]["model"], "deepseek-v4-pro")
+            env["CODEX_SWITCH_FIXED_MODEL"] = "doubao-seed-example"
+            result = subprocess.run([str(bridge), "app-server"], input="".join(json.dumps(x)+"\n" for x in lines), text=True, capture_output=True, timeout=20, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            messages = [json.loads(line)["params"] for line in result.stdout.splitlines()]
+            self.assertEqual([m.get("model") for m in messages], ["doubao-seed-example", "doubao-seed-example", "doubao-seed-example", None])
+            env["CODEX_SWITCH_ALLOWED_MODELS"] = json.dumps(["doubao-seed-example", "doubao-second"])
+            data={"method":"turn/start", "params":{"model":"doubao-second"}}
+            result = subprocess.run([str(bridge), "app-server"], input=json.dumps(data)+"\n", text=True, capture_output=True, timeout=20, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["params"]["model"], "doubao-second")
+            env["CODEX_SWITCH_FIXED_MODEL"] = "deepseek-v4-pro"
+            env["CODEX_SWITCH_ALLOWED_MODELS"] = json.dumps(["deepseek-flash", "deepseek-v4-pro"])
+            data={"method":"turn/start", "params":{"model":"deepseek-flash"}}
+            result = subprocess.run([str(bridge), "app-server"], input=json.dumps(data)+"\n", text=True, capture_output=True, timeout=20, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["params"]["model"], "deepseek-flash")

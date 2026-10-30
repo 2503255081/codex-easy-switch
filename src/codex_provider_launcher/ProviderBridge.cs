@@ -63,7 +63,7 @@ public class ProviderBridge {
         bool turn=method=="turn/start";
         if(!thread && !turn)return line;
         string fixedModel=Environment.GetEnvironmentVariable("CODEX_SWITCH_FIXED_MODEL");
-        if(!string.IsNullOrEmpty(fixedModel) && (provider!="launcher_custom" || fixedModel!="deepseek-flash"))throw new Exception("Invalid fixed model.");
+        if(!string.IsNullOrEmpty(fixedModel) && (provider!="launcher_custom" || !System.Text.RegularExpressions.Regex.IsMatch(fixedModel,@"\A[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}\z")))throw new Exception("Invalid fixed model.");
         var p=obj.ContainsKey("params")?obj["params"] as Dictionary<string,object>:null;
         if(p==null){p=new Dictionary<string,object>();obj["params"]=p;}
         if(thread)p["modelProvider"]=provider;
@@ -74,8 +74,21 @@ public class ProviderBridge {
         if(provider=="launcher_custom" && string.IsNullOrEmpty(fixedModel) && !string.IsNullOrEmpty(lastFile) && !string.IsNullOrEmpty(selected) && System.Text.RegularExpressions.Regex.IsMatch(selected,@"\A[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}\z"))
             try { File.WriteAllText(lastFile,selected,new UTF8Encoding(false)); } catch(IOException) {} catch(UnauthorizedAccessException) {}
         if(!thread && (string.IsNullOrEmpty(fixedModel) || provider!="launcher_custom"))return line;
+        string allowedJson=Environment.GetEnvironmentVariable("CODEX_SWITCH_ALLOWED_MODELS");
+        var allowed=new List<string>();
+        if(!string.IsNullOrEmpty(allowedJson)) {
+            var list=json.DeserializeObject(allowedJson) as object[];
+            if(list==null || list.Length>100)throw new Exception("Invalid model list.");
+            foreach(var item in list) {
+                string value=item as string;
+                if(value==null || !System.Text.RegularExpressions.Regex.IsMatch(value,@"\A[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}\z"))throw new Exception("Invalid model list.");
+                allowed.Add(value);
+            }
+            if(!allowed.Contains(fixedModel))throw new Exception("Default model missing from list.");
+        } else if(fixedModel=="deepseek-flash") { allowed.Add("deepseek-flash"); allowed.Add("deepseek-v4-pro"); }
+        else if(!string.IsNullOrEmpty(fixedModel))allowed.Add(fixedModel);
         if(!string.IsNullOrEmpty(fixedModel) && (selected!=null || thread)) {
-            if(selected!="deepseek-flash" && selected!="deepseek-v4-pro")selected=fixedModel;
+            if(!allowed.Contains(selected))selected=fixedModel;
             p["model"]=selected;
         }
         if(config!=null) {

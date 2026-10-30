@@ -12,7 +12,7 @@ import tomlkit
 
 from .adapter import ChatAdapter
 from .diagnostics import logger
-from .catalog import deepseek_catalog, list_models, fetch, verify
+from .catalog import deepseek_catalog, fixed_catalog, list_models, fetch, verify, reasoning_levels
 from .config import atomic_write, candidate, commit
 from .platforms import ensure_windows_bridge, find_linux_desktop, find_mac_desktop, find_posix_cli, is_desktop_running, posix_bridge, windows_runtime
 from .probe import clean_env, validate
@@ -104,9 +104,16 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
         active = profile
         if profile and profile.kind == "deepseek":
             # Normalize saved legacy profiles without changing their credential IDs.
-            profile = dataclasses.replace(profile, base_url="https://api.deepseek.com", model="deepseek-flash", codex_catalog=False)
+            model = profile.model if profile.model in ("deepseek-flash", "deepseek-v4-pro") else "deepseek-flash"
+            profile = dataclasses.replace(profile, base_url="https://api.deepseek.com", model=model, codex_catalog=False)
             active = dataclasses.replace(profile, kind="responses")
-            logger().info("DeepSeek native Responses API selected model=deepseek-flash")
+            logger().info("DeepSeek native Responses API selected model=%s", model)
+        if profile and profile.kind == "fixed_responses":
+            levels = reasoning_levels(profile.provider, profile.model)
+            effort = profile.reasoning_effort or ("low" if "low" in levels else "high")
+            if effort not in levels:
+                raise ValueError("所选推理深度不受当前模型支持，请在设置中重新选择。")
+            active = dataclasses.replace(profile, kind="responses", reasoning_effort=effort, models=[])
         if profile and profile.kind == "openai_chat":
             adapter = ChatAdapter(profile, secret)
             adapter.__enter__()
@@ -117,12 +124,15 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
         if profile and profile.kind == "deepseek":
             catalog_path, catalog_models = deepseek_catalog()
             logger().info("prepared DeepSeek model catalog for CLI validation")
+        if profile and profile.kind == "fixed_responses":
+            catalog_path, catalog_models = fixed_catalog(profile.model, profile.name, profile.models, profile.provider)
         if profile and profile.codex_catalog:
             if profile.kind != "responses":
                 raise ValueError("Codex 原生模型目录仅适用于 Responses 服务。")
             catalog_path, catalog_models = fetch(profile, secret, cli)
         personal_auth = bool(profile and has_personal_auth(config_home))
-        proposed = candidate(original or b"", active, personal_model.strip() if profile is None else None, catalog_path, isolate_catalog, personal_auth, deepseek=bool(profile and profile.kind == "deepseek"))
+        extras = tuple(dict.fromkeys(e for item in (catalog_models or []) for level in item.get("supported_reasoning_levels", []) if isinstance(level, dict) for e in [level.get("effort")] if isinstance(e, str))) if profile and profile.kind == "fixed_responses" else ()
+        proposed = candidate(original or b"", active, personal_model.strip() if profile is None else None, catalog_path, isolate_catalog, personal_auth, deepseek=bool(profile and profile.kind == "deepseek"), extra_efforts=extras)
         if profile is None and state_path.exists():
             saved = json.loads(state_path.read_text(encoding="utf-8"))
             if "reasoning_present" in saved:
@@ -141,8 +151,12 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
             last_dir = data_dir() / "last-models"
             last_dir.mkdir(parents=True, exist_ok=True)
             env["CODEX_SWITCH_LAST_MODEL_FILE"] = str(last_dir / (profile.id + ".txt"))
-        if profile and profile.kind == "deepseek":
+        if profile and profile.kind in ("deepseek", "fixed_responses"):
             env["CODEX_SWITCH_FIXED_MODEL"] = profile.model
+            if profile.kind == "deepseek":
+                env["CODEX_SWITCH_ALLOWED_MODELS"] = json.dumps(["deepseek-flash", "deepseek-v4-pro"])
+            elif profile.models:
+                env["CODEX_SWITCH_ALLOWED_MODELS"] = json.dumps(profile.models, ensure_ascii=True)
         env["CODEX_CLI_PATH"] = str(bridge)
         if secret:
             env["CODEX_LAUNCHER_API_KEY"] = secret

@@ -57,6 +57,44 @@ class LaunchTests(unittest.TestCase):
                 self.assertEqual(personal["projects"]["c:/fixture"]["trust_level"], "trusted")
                 self.assertEqual(auth.read_bytes(), b'fixture-only-auth')
 
+    def test_doubao_launch_preserves_allowed_models(self):
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as d, ExitStack() as stack:
+            root = Path(d)
+            (root / "config.toml").write_text('model="personal-model"\n')
+            profile = new_profile("豆包", "fixed_responses", "https://example.com/v1", "doubao-a")
+            profile.models = ["doubao-a", "doubao-b"]
+            stack.enter_context(patch.dict(os.environ, {"CODEX_HOME": str(root)}))
+            for name, value in {"is_desktop_running": False, "windows_runtime": (root / "app", root / "cli"),
+                                "ensure_windows_bridge": root / "bridge", "data_dir": root / "data",
+                                "fixed_catalog": (root / "catalog.json", None), "validate": {}}.items():
+                stack.enter_context(patch.object(launch, name, return_value=value))
+            stack.enter_context(patch.object(launch.CredentialStore, "get", return_value="fixture-key"))
+            popen = stack.enter_context(patch.object(launch.subprocess, "Popen"))
+            launch.launch(profile, "", "", "")
+            env = popen.call_args.kwargs["env"]
+            self.assertEqual(env["CODEX_SWITCH_FIXED_MODEL"], "doubao-a")
+            self.assertEqual(json.loads(env["CODEX_SWITCH_ALLOWED_MODELS"]), ["doubao-a", "doubao-b"])
+
+    def test_deepseek_pro_default_keeps_both_models_selectable(self):
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as d, ExitStack() as stack:
+            root = Path(d)
+            (root / "config.toml").write_text('model="personal-model"\n')
+            profile = new_profile("DeepSeek", "deepseek", "https://api.deepseek.com", "deepseek-v4-pro")
+            stack.enter_context(patch.dict(os.environ, {"CODEX_HOME": str(root)}))
+            for name, value in {"is_desktop_running": False, "windows_runtime": (root / "app", root / "cli"),
+                                "ensure_windows_bridge": root / "bridge", "data_dir": root / "data",
+                                "deepseek_catalog": (root / "catalog.json", None), "validate": {}}.items():
+                stack.enter_context(patch.object(launch, name, return_value=value))
+            stack.enter_context(patch.object(launch.CredentialStore, "get", return_value="fixture-key"))
+            popen = stack.enter_context(patch.object(launch.subprocess, "Popen"))
+            launch.launch(profile, "", "", "")
+            env = popen.call_args.kwargs["env"]
+            self.assertEqual(env["CODEX_SWITCH_FIXED_MODEL"], "deepseek-v4-pro")
+            self.assertEqual(json.loads(env["CODEX_SWITCH_ALLOWED_MODELS"]), ["deepseek-flash", "deepseek-v4-pro"])
+            self.assertEqual(tomlkit.parse((root / "config.toml").read_text())["model"], "deepseek-v4-pro")
+
     def test_legacy_deepseek_uses_native_api_without_chat_adapter(self):
         from contextlib import ExitStack
         with tempfile.TemporaryDirectory() as d, ExitStack() as stack:

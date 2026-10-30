@@ -28,7 +28,7 @@ def connection_error(exc: Exception) -> str:
     if isinstance(exc, urllib.error.HTTPError):
         code = exc.code
         if code in (401, 403):
-            return f"服务返回 HTTP {code}，请检查密钥及其访问权限。"
+            return f"服务返回 HTTP {code}，请检查完整 API 密钥、所属平台、计费类型及访问权限。"
         if code == 404:
             return "服务返回 HTTP 404，请检查中转站地址是否包含正确的 API 路径。"
         if code == 429:
@@ -48,6 +48,49 @@ def connection_error(exc: Exception) -> str:
     if isinstance(reason, (ConnectionResetError, ConnectionAbortedError)):
         return "连接被中断，请检查网络或中转站服务。"
     return "网络连接失败，请检查网络、代理设置和中转站地址。"
+
+
+def list_bailian_authorized(base_url: str, key: str, supported: tuple[str, ...]) -> list[str]:
+    """Query Beijing workspace's documented inference permissions without inference."""
+    parsed = urllib.parse.urlsplit(base_url)
+    host = parsed.hostname or ""
+    if (parsed.scheme != "https" or parsed.port is not None or parsed.username or parsed.password
+            or parsed.path.rstrip("/") != "/compatible-mode/v1"
+            or not re.fullmatch(r"[a-z0-9-]+\.cn-beijing\.maas\.aliyuncs\.com", host)
+            or host.startswith("token-plan.")):
+        raise ValueError("查询授权需填写百炼北京地域业务空间 ID；其他地域请手动选择模型。")
+    found = []
+    allowed = set(supported)
+    opener = urllib.request.build_opener(NoRedirect())
+    for page in range(1, 6):
+        params = urllib.parse.urlencode({"authorization_scope": "AUTHORIZED", "action": "INFERENCE", "page_no": page, "page_size": 200})
+        url = f"https://{host}/api/v1/models/permissions?{params}"
+        req = urllib.request.Request(url, headers={"Authorization": "Bearer " + key, "Accept": "application/json"})
+        try:
+            with opener.open(req, timeout=20) as response:
+                raw = response.read(4 * 1024 * 1024 + 1)
+            if len(raw) > 4 * 1024 * 1024:
+                raise ValueError("模型授权列表过大。")
+            doc = json.loads(raw)
+        except (urllib.error.URLError, OSError) as exc:
+            raise RuntimeError("无法读取百炼模型授权：" + connection_error(exc)) from exc
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError("百炼模型授权返回格式无效。") from exc
+        if not isinstance(doc, dict) or doc.get("success") is not True or not isinstance(doc.get("output"), dict):
+            raise ValueError("百炼模型授权查询失败或返回格式无效。")
+        output = doc["output"]
+        entries = output.get("permissions")
+        if not isinstance(entries, list) or len(entries) > 200:
+            raise ValueError("百炼模型授权列表格式无效。")
+        for item in entries:
+            if not isinstance(item, dict): continue
+            name = item.get("model")
+            permissions = item.get("permissions")
+            if isinstance(name, str) and name in allowed and isinstance(permissions, dict) and permissions.get("inference") is True and name not in found:
+                found.append(name)
+        total = output.get("total")
+        if not entries or len(entries) < 200 or (isinstance(total, int) and page * 200 >= total): break
+    return found
 
 
 def deepseek_catalog() -> tuple[Path, list[dict]]:
@@ -82,16 +125,97 @@ def deepseek_catalog() -> tuple[Path, list[dict]]:
     return path, models
 
 
-def list_models(profile: Profile, key: str, cli: Path) -> tuple[list[tuple[str, dict]], bool]:
+def reasoning_levels(provider: str, model: str) -> tuple[str, ...]:
+    """Only advertise distinct efforts documented for the specific service/model."""
+    if provider in ("qwen", "qianwen"):
+        if model in ("qwen3.8-max", "qwen3.8-flash"):
+            return ("none", "low", "medium", "xhigh")
+        if model in ("deepseek-v4-flash-0731", "deepseek-v4-pro-0813", "deepseek-v4.1-flash"):
+            return ("none", "low", "high", "max")
+        if model == "glm-5.3":
+            return ("low", "high", "max")
+        if model in ("glm-5.2", "deepseek-v4-pro"):
+            return ("none", "high", "max")
+    if provider == "doubao" and model in (
+        "doubao-seed-evolving", "doubao-seed-2-1-pro-260915", "doubao-seed-2-1-lite-260915",
+        "doubao-seed-2-1-pro-260628", "doubao-seed-2-1-turbo-260628",
+        "doubao-seed-2-0-lite-260428", "doubao-seed-2-0-mini-260428",
+    ):
+        return ("minimal", "low", "medium", "high")
+    return ("low",)
+
+
+def fixed_catalog(model_id: str, provider_name: str, model_ids: list[str] | None = None, provider: str = "") -> tuple[Path, list[dict]]:
+    """Use the installed Codex schema for one explicitly configured model."""
+    import os
+    home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
+    try:
+        cached = json.loads((home / "models_cache.json").read_text(encoding="utf-8"))
+        template = next(m for m in cached.get("models", []) if isinstance(m, dict) and m.get("visibility") == "list" and m.get("slug"))
+    except (OSError, ValueError, TypeError, StopIteration) as exc:
+        raise RuntimeError("找不到 Codex 模型模板，请先用个人账号启动一次 Codex。") from exc
+    model = copy.deepcopy(template)
+    model.update(slug=model_id, display_name=model_id, description=provider_name + " Responses API",
+                 visibility="list", priority=0, default_reasoning_level="low",
+                 context_window=32768, max_context_window=32768, input_modalities=["text"],
+                 additional_speed_tiers=[], service_tiers=[], availability_nux=None, upgrade=None,
+                 prefer_websockets=False, apply_patch_tool_type="freeform", supports_parallel_tool_calls=False,
+                 tool_mode=None, use_responses_lite=False, experimental_supported_tools=[],
+                 supports_image_detail_original=False, auto_compact_token_limit=None)
+    model["supported_reasoning_levels"] = [{"effort": "low", "description": "low"}]
+    ids = list(dict.fromkeys([model_id, *(model_ids or [])]))
+    if len(ids) > 100 or any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}", value) for value in ids):
+        raise ValueError("模型列表无效。")
+    models = []
+    for priority, value in enumerate(ids):
+        item = copy.deepcopy(model)
+        levels = reasoning_levels(provider, value)
+        default = "low" if "low" in levels else ("high" if "high" in levels else levels[0])
+        item.update(slug=value, display_name=value, priority=priority, default_reasoning_level=default,
+                    supported_reasoning_levels=[{"effort": e, "description": e} for e in levels])
+        models.append(item)
+    raw = json.dumps({"models": models}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    path = data_dir() / "catalogs" / ("catalog-" + hashlib.sha256(raw).hexdigest() + ".json")
+    if path.exists() and path.read_bytes() != raw:
+        raise RuntimeError("模型目录文件不匹配。")
+    if not path.exists():
+        atomic_write(path, raw)
+    return path, models
+
+
+def test_responses(profile: Profile, key: str) -> None:
+    """Send a short user-initiated inference; this can consume paid quota."""
+    payload = json.dumps({"model": profile.model, "input": "Reply with OK.", "max_output_tokens": 32, "stream": False}).encode("utf-8")
+    request = urllib.request.Request(profile.base_url + "/responses", data=payload, method="POST",
+        headers={"Authorization": "Bearer " + key, "Content-Type": "application/json", "Accept": "application/json"})
+    try:
+        with urllib.request.build_opener(NoRedirect()).open(request, timeout=45) as response:
+            raw = response.read(1024 * 1024 + 1)
+        document = json.loads(raw)
+        if len(raw) > 1024 * 1024 or not isinstance(document, dict) or not isinstance(document.get("output"), list):
+            raise ValueError("服务没有返回有效的 Responses 数据。")
+        if document.get("status") in ("failed", "incomplete"):
+            raise ValueError("服务返回失败或未完成的推理结果。")
+    except (urllib.error.URLError, OSError) as exc:
+        raise RuntimeError("模型调用失败：" + connection_error(exc)) from exc
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("服务返回的数据不是有效的 Responses JSON。") from exc
+
+
+def list_models(profile: Profile, key: str, cli: Path, opencodex_header: bool = True) -> tuple[list[tuple[str, dict]], bool]:
     """Read visible models without sending an inference request."""
-    version = subprocess.run([str(cli), "--version"], capture_output=True, text=True, timeout=10,
-                             env=clean_env(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    match = re.match(r"^codex-cli\s+(\S+)", version.stdout.strip())
-    if version.returncode or not match:
-        raise RuntimeError("无法读取 Codex 版本，未更改配置。")
-    url = profile.base_url + "/models?" + urllib.parse.urlencode({"client_version": match.group(1)})
-    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + key,
-        "x-opencodex-api-key": key, "Accept": "application/json"})
+    url = profile.base_url + "/models"
+    if opencodex_header:
+        version = subprocess.run([str(cli), "--version"], capture_output=True, text=True, timeout=10,
+                                 env=clean_env(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        match = re.match(r"^codex-cli\s+(\S+)", version.stdout.strip())
+        if version.returncode or not match:
+            raise RuntimeError("无法读取 Codex 版本，未更改配置。")
+        url += "?" + urllib.parse.urlencode({"client_version": match.group(1)})
+    headers = {"Authorization": "Bearer " + key, "Accept": "application/json"}
+    if opencodex_header:
+        headers["x-opencodex-api-key"] = key
+    req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.build_opener(NoRedirect()).open(req, timeout=30) as response:
             raw = response.read(4 * 1024 * 1024 + 1)
