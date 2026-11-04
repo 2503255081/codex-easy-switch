@@ -1,4 +1,4 @@
-"""Launch orchestration: validate first, never touch chats or auth files."""
+"""Validate configuration, migrate backed-up route metadata, and launch Desktop."""
 from __future__ import annotations
 
 import dataclasses
@@ -9,6 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 import tomlkit
+from filelock import FileLock
 
 from .adapter import ChatAdapter
 from .diagnostics import logger
@@ -17,6 +18,7 @@ from .config import atomic_write, candidate, commit
 from .platforms import ensure_windows_bridge, find_linux_desktop, find_mac_desktop, find_posix_cli, is_desktop_running, posix_bridge, windows_runtime
 from .probe import clean_env, validate
 from .profiles import CredentialStore, Profile, data_dir
+from .history import migrate_routes, restore_routes
 
 
 def has_personal_auth(config_home: Path) -> bool:
@@ -130,7 +132,7 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
             if profile.kind != "responses":
                 raise ValueError("Codex 原生模型目录仅适用于 Responses 服务。")
             catalog_path, catalog_models = fetch(profile, secret, cli)
-        personal_auth = bool(profile and has_personal_auth(config_home))
+        personal_auth = bool(profile and not profile.quota_compatibility and has_personal_auth(config_home))
         extras = tuple(dict.fromkeys(e for item in (catalog_models or []) for level in item.get("supported_reasoning_levels", []) if isinstance(level, dict) for e in [level.get("effort")] if isinstance(e, str))) if profile and profile.kind == "fixed_responses" else ()
         proposed = candidate(original or b"", active, personal_model.strip() if profile is None else None, catalog_path, isolate_catalog, personal_auth, deepseek=bool(profile and profile.kind == "deepseek"), extra_efforts=extras)
         if profile is None and state_path.exists():
@@ -143,7 +145,7 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
                     personal_doc.pop("model_reasoning_effort", None)
                 proposed = tomlkit.dumps(personal_doc).encode("utf-8")
         if profile:
-            logger().info("personal account identity available=%s", personal_auth)
+            logger().info("OpenAI authentication enabled for provider=%s quota_compatibility=%s", personal_auth, profile.quota_compatibility)
         env = clean_env()
         env["CODEX_SWITCH_REAL_CLI"] = str(cli)
         env["CODEX_SWITCH_PROVIDER"] = "launcher_custom" if profile else "openai"
@@ -170,19 +172,37 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
                 logger().info("selected model Fast option available=%s", any(
                     isinstance(item, dict) and (item.get("id") in ("fast", "priority") or str(item.get("name", "")).lower() == "fast")
                     for item in tiers))
-        commit(config_path, original, proposed, data_dir() / "backups", check)
-        logger().info("configuration validated and saved; recovery record created")
-        try:
-            child = subprocess.Popen(command, env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            logger().info("Codex launch process created pid=%s", getattr(child, "pid", "unknown"))
-        except BaseException:
-            # Restore only if nobody changed the candidate after commit.
-            if config_path.exists() and config_path.read_bytes() == proposed:
-                if original is None:
-                    config_path.unlink()
-                else:
-                    atomic_write(config_path, original)
-            raise
+        # Serialize config/index writes and process creation across launcher instances.
+        with FileLock(str(config_home / ".codex-launcher-start.lock"), timeout=5):
+            if is_desktop_running():
+                raise RuntimeError("Codex Desktop 已启动，请退出后重试；未修改配置。")
+            commit(config_path, original, proposed, data_dir() / "backups", check)
+            logger().info("configuration validated and saved; recovery record created")
+            route_backup = None
+            try:
+                if is_desktop_running():
+                    raise RuntimeError("Codex Desktop 已启动，请退出后重试。")
+                route_backup = migrate_routes(config_home, "launcher_custom" if profile else "openai", data_dir() / "backups")
+                if route_backup:
+                    record_path = data_dir() / "backups" / "last-change.json"
+                    record = json.loads(record_path.read_text(encoding="utf-8"))
+                    record["history_routes"] = route_backup.name
+                    atomic_write(record_path, json.dumps(record).encode("utf-8"))
+                    logger().info("paginated chat provider metadata migrated; recovery=%s", route_backup.name)
+                child = subprocess.Popen(command, env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                logger().info("Codex launch process created pid=%s", getattr(child, "pid", "unknown"))
+            except BaseException:
+                try:
+                    if route_backup:
+                        restore_routes(config_home, route_backup)
+                finally:
+                    # Restore only if nobody changed the candidate after commit.
+                    if config_path.exists() and config_path.read_bytes() == proposed:
+                        if original is None:
+                            config_path.unlink()
+                        else:
+                            atomic_write(config_path, original)
+                raise
         return child, adapter
     except BaseException:
         if adapter:

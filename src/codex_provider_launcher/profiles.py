@@ -47,11 +47,14 @@ class Profile:
     provider: str = ""
     visible: bool = True
     models: list[str] = field(default_factory=list)
+    quota_compatibility: bool = False
 
     def validate(self) -> None:
         uuid.UUID(self.id)
         if self.provider not in ("", "custom", "deepseek", "doubao", "qwen", "qianwen") or not isinstance(self.visible, bool):
             raise ValueError("提供商设置无效。")
+        if not isinstance(self.quota_compatibility, bool):
+            raise ValueError("额度兼容设置无效。")
         if not self.name.strip() or self.kind not in KINDS:
             raise ValueError("请输入名称并选择有效的接口类型。")
         if not isinstance(self.models, list) or len(self.models) > 100 or any(not isinstance(m, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}", m) for m in self.models) or len(set(self.models)) != len(self.models):

@@ -66,6 +66,7 @@ class Launcher(tk.Tk):
         self.effort_choice = tk.StringVar(value="跟随当前设置")
         self.connection_status = tk.StringVar()
         self.visible = tk.BooleanVar(value=True)
+        self.quota_compatibility = tk.BooleanVar(value=False)
         self.plan = tk.StringVar(value="按量 API")
         self.qianwen_plan = tk.StringVar(value="按量 API")
         self.more_models = tk.StringVar()
@@ -85,7 +86,7 @@ class Launcher(tk.Tk):
         ttk.Label(header, text="Codex 启动器", font=("TkDefaultFont", 17, "bold")).pack(side="left")
         ttk.Button(header, text="⚙ 设置", command=self.open_settings).pack(side="right")
         ttk.Button(header, text="日志", command=self.open_logs).pack(side="right", padx=(0, 6))
-        ttk.Label(outer, text="选择使用方式，然后启动 Codex。", wraplength=480).pack(anchor="w", pady=(3, 14))
+        ttk.Label(outer, text="选择使用方式，然后启动 Codex。旧对话会跟随所选服务继续，切换前自动备份。", wraplength=460).pack(anchor="w", pady=(3, 14))
         self.launch_buttons = []
         self.button_area = ttk.Frame(outer)
         self.button_area.pack(fill="both", expand=True)
@@ -173,8 +174,8 @@ class Launcher(tk.Tk):
         window = tk.Toplevel(self)
         self.settings_window = window
         window.title("设置")
-        window.geometry("760x690")
-        window.minsize(660, 590)
+        window.geometry("760x720")
+        window.minsize(660, 620)
         window.transient(self)
         frame = ttk.Frame(window, padding=18)
         frame.pack(fill="both", expand=True)
@@ -223,6 +224,8 @@ class Launcher(tk.Tk):
         self.effort_entry = ttk.Combobox(self.form, textvariable=self.effort_choice, state="readonly", values=("跟随当前设置", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"))
         self.visible_check = ttk.Checkbutton(frame, text="在启动页显示此提供商", variable=self.visible)
         self.visible_check.pack(anchor="w", pady=(10, 0))
+        self.quota_check = ttk.Checkbutton(frame, text="个人额度耗尽兼容模式（可能不显示个人额度）", variable=self.quota_compatibility)
+        self.quota_check.pack(anchor="w", pady=(5, 0))
         ttk.Button(frame, text="保存设置", command=self.save_settings).pack(fill="x", pady=(12, 0))
         ttk.Button(frame, text="恢复上一次切换前的配置", command=self.restore).pack(fill="x", pady=(7, 0))
         self.select_mode()
@@ -267,6 +270,7 @@ class Launcher(tk.Tk):
             self.custom_frame.pack_forget()
         prior = self.existing(mode)
         self.visible.set(prior.visible if prior else True)
+        self.quota_compatibility.set(prior.quota_compatibility if prior else False)
         self.key.set("")
         self.connection_status.set("")
         self.model_details = {}
@@ -609,6 +613,7 @@ class Launcher(tk.Tk):
             profile.models = list(dict.fromkeys([selected, *values]))
         profile.provider = "custom" if mode == "relay" else mode
         profile.visible = self.visible.get() if hasattr(self, "visible") else True
+        profile.quota_compatibility = self.quota_compatibility.get() if hasattr(self, "quota_compatibility") else (prior.quota_compatibility if prior else False)
         if (mode == "relay" and kind == "responses") or mode in ("doubao", "qwen", "qianwen"):
             effort = self.effort_choice.get()
             profile.reasoning_effort = "" if effort == "跟随当前设置" else effort
@@ -696,7 +701,7 @@ class Launcher(tk.Tk):
         self.destroy()
 
     def restore(self):
-        if not messagebox.askyesno("恢复配置", "恢复上次切换前的配置；该配置可能包含旧插件或失效的模型目录。继续吗？"):
+        if not messagebox.askyesno("恢复配置", "恢复上次切换前的配置和已备份的对话路由；该配置可能包含旧插件或失效的模型目录。继续吗？"):
             return
         try:
             if is_desktop_running():

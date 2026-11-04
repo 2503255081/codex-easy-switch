@@ -12,6 +12,54 @@ from codex_provider_launcher.profiles import new_profile
 
 @unittest.skipUnless(os.name == "nt", "desktop launch orchestration mock currently covers Windows")
 class LaunchTests(unittest.TestCase):
+    def test_desktop_launch_failure_restores_config_and_chat_routes(self):
+        from contextlib import ExitStack
+        from test_history import fixture, routes
+        with tempfile.TemporaryDirectory() as d, ExitStack() as stack:
+            root=Path(d);db=fixture(root);before=routes(db)
+            config=root/'config.toml';original=b'model_provider="openai"\nmodel="personal-model"\n'
+            config.write_bytes(original)
+            profile=new_profile('fixture','responses','https://example.com/v1','relay-model')
+            stack.enter_context(patch.dict(os.environ, {'CODEX_HOME':str(root)}))
+            for name,value in {'is_desktop_running':False,'windows_runtime':(root/'app',root/'cli'),
+                               'ensure_windows_bridge':root/'bridge','data_dir':root/'data','validate':{}}.items():
+                stack.enter_context(patch.object(launch,name,return_value=value))
+            stack.enter_context(patch.object(launch,'list_models',return_value=([('relay-model',{})],False)))
+            stack.enter_context(patch.object(launch.CredentialStore,'get',return_value='fixture-key'))
+            stack.enter_context(patch.object(launch.subprocess,'Popen',side_effect=OSError('fixture launch failure')))
+            with self.assertRaises(OSError):launch.launch(profile,'','','')
+            self.assertEqual(config.read_bytes(),original)
+            self.assertEqual(routes(db),before)
+
+    def test_quota_compatibility_uses_api_key_without_openai_auth_and_preserves_login(self):
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as d, ExitStack() as stack:
+            root = Path(d)
+            config = root / "config.toml"
+            config.write_text('model="personal-model"\n[projects."c:/fixture"]\ntrust_level="trusted"\n')
+            auth = root / "auth.json"
+            original_auth = json.dumps({"auth_mode": "chatgpt", "tokens": {"access_token": "fixture"}}).encode()
+            auth.write_bytes(original_auth)
+            profile = new_profile("DeepSeek", "deepseek", "https://api.deepseek.com", "deepseek-flash")
+            profile.quota_compatibility = True
+            stack.enter_context(patch.dict(os.environ, {"CODEX_HOME": str(root)}))
+            for name, value in {"is_desktop_running": False, "windows_runtime": (root / "app", root / "cli"),
+                                "ensure_windows_bridge": root / "bridge", "data_dir": root / "data",
+                                "deepseek_catalog": (root / "data" / "catalogs" / "catalog-fixture.json", None), "validate": {}}.items():
+                stack.enter_context(patch.object(launch, name, return_value=value))
+            stack.enter_context(patch("codex_provider_launcher.config.data_dir", return_value=root / "data"))
+            stack.enter_context(patch.object(launch.CredentialStore, "get", return_value="fixture-key"))
+            popen = stack.enter_context(patch.object(launch.subprocess, "Popen"))
+            launch.launch(profile, "", "", "")
+            doc = tomlkit.parse(config.read_text())
+            self.assertNotIn("requires_openai_auth", doc["model_providers"]["launcher_custom"])
+            self.assertEqual(doc["model_providers"]["launcher_custom"]["env_key"], "CODEX_LAUNCHER_API_KEY")
+            self.assertEqual(popen.call_args.kwargs["env"]["CODEX_LAUNCHER_API_KEY"], "fixture-key")
+            self.assertEqual(auth.read_bytes(), original_auth)
+            launch.launch(None, "", "", "")
+            self.assertEqual(tomlkit.parse(config.read_text())["projects"]["c:/fixture"]["trust_level"], "trusted")
+            self.assertEqual(auth.read_bytes(), original_auth)
+
     def test_personal_login_detection_handles_missing_and_api_key_only(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)

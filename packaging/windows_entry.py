@@ -17,8 +17,21 @@ def self_test(report):
         from codex_provider_launcher.app import Launcher
         from codex_provider_launcher.profiles import CredentialStore
         from codex_provider_launcher.platforms import ensure_windows_bridge, system_powershell
+        from codex_provider_launcher.history import migrate_routes, restore_routes
         import keyring
         import subprocess
+        import sqlite3
+        history_home = Path(directory) / "history-fixture"
+        history_home.mkdir()
+        conn = sqlite3.connect(history_home / "state_5.sqlite")
+        try:
+            conn.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, model_provider TEXT, history_mode TEXT)")
+            conn.execute("INSERT INTO threads VALUES ('fixture','openai','paginated')")
+            conn.commit()
+        finally:
+            conn.close()
+        route_backup = migrate_routes(history_home, "launcher_custom", Path(directory) / "backups")
+        assert route_backup and restore_routes(history_home, route_backup) == 1
         vault = CredentialStore()
         credential_id = "package-test-" + str(uuid.uuid4())
         try:
@@ -33,6 +46,8 @@ def self_test(report):
             app.open_settings("relay")
             app.update_idletasks()
             assert app.test_button.cget("text") == "测试连接并获取模型"
+            assert "额度耗尽兼容模式" in app.quota_check.cget("text")
+            assert not app.quota_compatibility.get()
             app.mode.set("doubao")
             app.select_mode()
             assert app.model_choice.get().startswith("doubao-")
@@ -71,7 +86,7 @@ def self_test(report):
             data = {"ok": True, "launcher_bits": struct.calcsize("P") * 8,
                     "powershell_bits": int(result.stdout.strip()) * 8,
                     "credential_backend": type(keyring.get_keyring()).__name__,
-                    "tk": True, "bridge_persisted": True}
+                    "tk": True, "bridge_persisted": True, "history_routes": True}
         finally:
             app.destroy()
             import logging

@@ -28,6 +28,16 @@ def fixture(mode, url='', model='example-model', plan='按量 API'):
     return obj
 
 class PresetTests(unittest.TestCase):
+    def test_quota_compatibility_is_optional_and_saved(self):
+        obj=fixture('relay',url='https://example.com/v1',model='model-1')
+        obj.quota_compatibility=Var(True)
+        p=Launcher.prepare_profile(obj)
+        self.assertTrue(p.quota_compatibility)
+        with tempfile.TemporaryDirectory() as d:
+            store=ProfileStore(Path(d))
+            store.save([p])
+            self.assertTrue(store.load()[0].quota_compatibility)
+
     def test_provider_urls_profiles_and_masks(self):
         for plan, suffix in [('按量 API','/api/v3'), ('Coding Plan','/api/coding/v3'), ('Agent Plan','/api/plan/v3')]:
             obj=fixture('doubao',model='endpoint-123',plan=plan)

@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -128,6 +129,12 @@ def restore_last(path: Path, backups: Path) -> None:
         original = (backups / (before + ".toml.bak")).read_bytes() if before else None
         if original is not None and hashlib.sha256(original).hexdigest() != before:
             raise ValueError("备份内容校验失败。")
+        history_record = record.get("history_routes")
+        if history_record is not None:
+            if not isinstance(history_record, str) or not re.fullmatch(r"history-routes-[0-9a-f]{32}\.json", history_record):
+                raise ValueError("对话路由恢复记录名称无效。")
+            from .history import restore_routes
+            restore_routes(path.parent, backups / history_record)
         atomic_write(backups / (hashlib.sha256(current).hexdigest() + ".toml.bak"), current)
         if original is None:
             path.unlink()
