@@ -43,9 +43,12 @@ def gui_self_test(report):
     with tempfile.TemporaryDirectory(prefix="launcher-posix-gui-") as directory:
         profiles.data_dir = lambda: Path(directory)
         launcher_app.data_dir = lambda: Path(directory)
-        app = launcher_app.Launcher()
+        app = launcher_app.Launcher(check_updates=False)
         try:
             app.update()
+            from codex_provider_launcher import __version__
+            assert app.update_text.get() == "v" + __version__
+            assert str(app.update_button.cget("text")) == "检查更新"
             app.open_settings("relay")
             app.update()
             if len(app.launch_buttons) != 1 or str(app.launch_buttons[0].cget("text")) != "个人账号":
@@ -75,9 +78,13 @@ if __name__ == "__main__":
         sys.argv.pop(1)
         from codex_provider_launcher.bridge import main
         sys.exit(main())
-    if len(sys.argv) == 3 and sys.argv[1] in ("--self-test", "--self-test-gui"):
+    if len(sys.argv) == 3 and sys.argv[1] in ("--self-test", "--self-test-gui", "--self-test-https"):
         try:
-            (self_test if sys.argv[1] == "--self-test" else gui_self_test)(sys.argv[2])
+            if sys.argv[1] == "--self-test-https":
+                from codex_provider_launcher.network import https_self_test
+                https_self_test(sys.argv[2])
+            else:
+                (self_test if sys.argv[1] == "--self-test" else gui_self_test)(sys.argv[2])
         except Exception as exc:
             Path(sys.argv[2]).write_text(json.dumps({"ok": False, "error": type(exc).__name__ + ": " + str(exc)}), encoding="utf-8")
             sys.exit(1)

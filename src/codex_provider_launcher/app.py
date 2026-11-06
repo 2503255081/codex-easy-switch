@@ -19,6 +19,8 @@ from .launch import launch
 from .platforms import is_desktop_running, windows_runtime, find_posix_cli, find_linux_desktop, find_mac_desktop
 from .catalog import list_models, list_bailian_authorized, test_responses, reasoning_levels
 from .profiles import CredentialStore, ProfileStore, data_dir, new_profile, normalize_url
+from . import __version__
+from .updates import check_update, INTERVAL
 
 
 # Public documentation examples, not a claim of account entitlement.
@@ -49,7 +51,7 @@ def doubao_migration_models(profile):
 
 
 class Launcher(tk.Tk):
-    def __init__(self):
+    def __init__(self, *, check_updates=True):
         super().__init__()
         self.title("Codex 启动器")
         self.geometry("500x390")
@@ -59,6 +61,11 @@ class Launcher(tk.Tk):
         self.adapters = []
         self.profiles = []
         self.busy = False
+        self.update_busy = False
+        self.update_available = None
+        self.update_timer = None
+        self.closing = False
+        self.check_updates_enabled = check_updates
         self.mode = tk.StringVar(value="relay")
         self.url = tk.StringVar()
         self.key = tk.StringVar()
@@ -90,6 +97,12 @@ class Launcher(tk.Tk):
         self.launch_buttons = []
         self.button_area = ttk.Frame(outer)
         self.button_area.pack(fill="both", expand=True)
+        update_area = ttk.Frame(outer)
+        update_area.pack(fill="x", pady=(5, 0))
+        self.update_text = tk.StringVar(value="v" + __version__)
+        ttk.Label(update_area, textvariable=self.update_text).pack(side="left")
+        self.update_button = ttk.Button(update_area, text="检查更新", command=lambda: self.check_updates(manual=True))
+        self.update_button.pack(side="right")
         ttk.Label(outer, textvariable=self.status, wraplength=480).pack(anchor="w", pady=12)
         try:
             self.profiles = self.store.load()
@@ -97,6 +110,50 @@ class Launcher(tk.Tk):
             logger().error("profile loading failed: %s", exc)
             messagebox.showerror("无法读取服务设置", str(exc))
         self.refresh_launch_buttons()
+        if check_updates:
+            self.update_timer = self.after(1500, self.check_updates)
+
+    def check_updates(self, manual=False):
+        if self.update_available and manual:
+            webbrowser.open(self.update_available.download_url)
+            return
+        if self.update_busy or self.closing:
+            return
+        self.update_busy = True
+        if self.update_timer is not None:
+            self.after_cancel(self.update_timer)
+            self.update_timer = None
+        self.update_button.configure(state="disabled")
+        if manual:
+            self.update_text.set("正在检查更新……")
+        def worker():
+            try:
+                update, error = check_update(force=manual), None
+            except Exception as exc:
+                update, error = None, exc
+            def done():
+                if self.closing:
+                    return
+                self.update_busy = False
+                self.update_button.configure(state="normal")
+                if error:
+                    logger().warning("update check failed: %s", type(error).__name__)
+                    if manual:
+                        self.update_text.set("检查失败，可稍后重试")
+                    elif not self.update_available:
+                        self.update_text.set("v" + __version__)
+                else:
+                    self.update_available = update
+                    self.update_text.set("发现新版 v" + update.version if update else "v" + __version__ + (" · 已是最新版" if manual else ""))
+                    self.update_button.configure(text="下载更新" if update else "检查更新")
+                if self.check_updates_enabled:
+                    self.update_timer = self.after(INTERVAL * 1000, self.check_updates)
+            if not self.closing:
+                try:
+                    self.after(0, done)
+                except (RuntimeError, tk.TclError):
+                    pass
+        threading.Thread(target=worker, daemon=True).start()
 
     def refresh_launch_buttons(self):
         for widget in self.button_area.winfo_children():
@@ -698,6 +755,9 @@ class Launcher(tk.Tk):
         for adapter in self.adapters:
             adapter.__exit__(None, None, None)
         logger().info("launcher closed")
+        self.closing = True
+        if self.update_timer is not None:
+            self.after_cancel(self.update_timer)
         self.destroy()
 
     def restore(self):

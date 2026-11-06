@@ -40,9 +40,12 @@ def self_test(report):
         finally:
             if vault.get(credential_id) is not None:
                 vault.delete(credential_id)
-        app = Launcher()
+        app = Launcher(check_updates=False)
         app.withdraw()
         try:
+            from codex_provider_launcher import __version__
+            assert app.update_text.get() == "v" + __version__
+            assert app.update_button.cget("text") == "检查更新"
             app.open_settings("relay")
             app.update_idletasks()
             assert app.test_button.cget("text") == "测试连接并获取模型"
@@ -100,9 +103,13 @@ if __name__ == "__main__":
     import tkinter
     import keyring
     ctypes.windll.kernel32.SetDllDirectoryW(None)
-    if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
+    if len(sys.argv) == 3 and sys.argv[1] in ("--self-test", "--self-test-https"):
         try:
-            self_test(sys.argv[2])
+            if sys.argv[1] == "--self-test-https":
+                from codex_provider_launcher.network import https_self_test
+                https_self_test(sys.argv[2])
+            else:
+                self_test(sys.argv[2])
         except Exception as exc:
             Path(sys.argv[2]).write_text(json.dumps({"ok": False, "error": type(exc).__name__ + ": " + str(exc)}), encoding="utf-8")
             sys.exit(1)

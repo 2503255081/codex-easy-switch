@@ -16,17 +16,15 @@ from pathlib import Path
 from .config import atomic_write
 from .probe import clean_env
 from .profiles import Profile, data_dir
-
-
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
+from .network import build_api_opener
 
 
 def connection_error(exc: Exception) -> str:
     """Describe network failures without echoing URLs, response bodies or keys."""
     if isinstance(exc, urllib.error.HTTPError):
         code = exc.code
+        if code in (301, 302, 303, 307, 308):
+            return f"服务返回 HTTP {code} 重定向，请填写最终 API 基础地址（通常以 /v1 结尾）；不会自动向跳转地址发送密钥。"
         if code in (401, 403):
             return f"服务返回 HTTP {code}，请检查完整 API 密钥、所属平台、计费类型及访问权限。"
         if code == 404:
@@ -41,6 +39,8 @@ def connection_error(exc: Exception) -> str:
         return "连接超时，请检查网络或中转站响应速度后重试。"
     if isinstance(reason, socket.gaierror):
         return "域名解析失败，请检查网络和 DNS。"
+    if isinstance(reason, ssl.SSLCertVerificationError):
+        return "HTTPS 证书校验失败，请检查系统时间、域名与证书是否匹配，以及服务端证书链。Mac 使用系统钥匙串信任设置；企业代理需配置其可信证书。"
     if isinstance(reason, ssl.SSLError):
         return "HTTPS 证书或加密连接失败，请检查系统时间和证书。"
     if isinstance(reason, ConnectionRefusedError):
@@ -61,7 +61,7 @@ def list_bailian_authorized(base_url: str, key: str, supported: tuple[str, ...])
         raise ValueError("查询授权需填写百炼北京地域业务空间 ID；其他地域请手动选择模型。")
     found = []
     allowed = set(supported)
-    opener = urllib.request.build_opener(NoRedirect())
+    opener = build_api_opener()
     for page in range(1, 6):
         params = urllib.parse.urlencode({"authorization_scope": "AUTHORIZED", "action": "INFERENCE", "page_no": page, "page_size": 200})
         url = f"https://{host}/api/v1/models/permissions?{params}"
@@ -189,7 +189,7 @@ def test_responses(profile: Profile, key: str) -> None:
     request = urllib.request.Request(profile.base_url + "/responses", data=payload, method="POST",
         headers={"Authorization": "Bearer " + key, "Content-Type": "application/json", "Accept": "application/json"})
     try:
-        with urllib.request.build_opener(NoRedirect()).open(request, timeout=45) as response:
+        with build_api_opener().open(request, timeout=45) as response:
             raw = response.read(1024 * 1024 + 1)
         document = json.loads(raw)
         if len(raw) > 1024 * 1024 or not isinstance(document, dict) or not isinstance(document.get("output"), list):
@@ -217,7 +217,7 @@ def list_models(profile: Profile, key: str, cli: Path, opencodex_header: bool = 
         headers["x-opencodex-api-key"] = key
     req = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.build_opener(NoRedirect()).open(req, timeout=30) as response:
+        with build_api_opener().open(req, timeout=30) as response:
             raw = response.read(4 * 1024 * 1024 + 1)
         if len(raw) > 4 * 1024 * 1024:
             raise ValueError("模型列表过大。")
@@ -266,7 +266,7 @@ def fetch(profile: Profile, key: str, cli: Path) -> tuple[Path, list[dict]]:
     url = profile.base_url + "/models?" + urllib.parse.urlencode({"client_version": match.group(1)})
     req = urllib.request.Request(url, headers={"Authorization": "Bearer " + key, "x-opencodex-api-key": key, "Accept": "application/json"})
     try:
-        with urllib.request.build_opener(NoRedirect()).open(req, timeout=30) as response:
+        with build_api_opener().open(req, timeout=30) as response:
             raw = response.read(4 * 1024 * 1024 + 1)
     except (urllib.error.URLError, OSError) as exc:
         raise RuntimeError("读取模型目录失败：" + connection_error(exc) + " 配置未修改。") from exc

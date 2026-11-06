@@ -23,6 +23,7 @@ subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "
                 "--copy-metadata", "keyring", "--copy-metadata", "jaraco.classes", "--copy-metadata", "jaraco.context",
                 "--copy-metadata", "jaraco.functools", "--copy-metadata", "more-itertools",
                 "--copy-metadata", "tomlkit", "--copy-metadata", "filelock", "--copy-metadata", "pywin32-ctypes",
+                "--collect-data", "certifi", "--copy-metadata", "certifi", "--copy-metadata", "truststore",
                 "--add-data", str(Path(sys.base_prefix) / "LICENSE.txt") + ";licenses/python",
                 "--add-data", str(bridge) + ";codex_provider_launcher",
                 str(root / "packaging/windows_entry.py")], check=True, cwd=root)

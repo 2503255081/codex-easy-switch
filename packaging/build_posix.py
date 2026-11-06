@@ -21,7 +21,8 @@ args = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--window
         "--distpath", str(dist), "--workpath", str(work / "work"), "--specpath", str(work), "--paths", str(root / "src"),
         "--hidden-import", "codex_provider_launcher.bridge", "--copy-metadata", "keyring", "--copy-metadata", "tomlkit",
         "--copy-metadata", "filelock", "--copy-metadata", "jaraco.classes", "--copy-metadata", "jaraco.context",
-        "--copy-metadata", "jaraco.functools", "--copy-metadata", "more-itertools"]
+        "--copy-metadata", "jaraco.functools", "--copy-metadata", "more-itertools",
+        "--collect-data", "certifi", "--copy-metadata", "certifi", "--copy-metadata", "truststore"]
 if system == "macOS":
     args += ["--onedir", "--hidden-import", "keyring.backends.macOS"]
 else:
