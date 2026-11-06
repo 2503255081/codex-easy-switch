@@ -9,6 +9,8 @@ import struct
 import sys
 import time
 import urllib.request
+import urllib.error
+import urllib.parse
 
 from . import __version__
 from .config import atomic_write
@@ -43,6 +45,25 @@ class Update:
     download_url: str
 
 
+def release_page_fallback() -> dict:
+    """GitHub's public release redirect remains usable when the API is rate-limited."""
+    root = f"https://github.com/{REPOSITORY}/releases"
+    request = urllib.request.Request(root + "/latest", headers={"User-Agent": "Codex-Easy-Switch/" + __version__})
+    try:
+        with build_api_opener().open(request, timeout=10) as response:
+            location = response.geturl()
+    except urllib.error.HTTPError as exc:
+        if exc.code not in (301, 302, 303, 307, 308):
+            raise
+        location = urllib.parse.urljoin(root + "/latest", exc.headers.get("Location", ""))
+        exc.close()
+    match = re.fullmatch(re.escape(root) + r"/tag/(v?\d{1,6}\.\d{1,6}\.\d{1,6})", location)
+    if not match:
+        raise ValueError("公开发布页未返回有效的稳定版本。")
+    # Without an API asset inventory, open the verified release page for downloads.
+    return {"tag_name": match.group(1), "draft": False, "prerelease": False, "assets": []}
+
+
 def available_update(document: dict) -> Update | None:
     if not isinstance(document, dict):
         raise ValueError("更新信息格式无效。")
@@ -75,11 +96,17 @@ def check_update(force: bool = False) -> Update | None:
             pass
     request = urllib.request.Request(RELEASE_API, headers={"Accept": "application/vnd.github+json",
                                       "User-Agent": "Codex-Easy-Switch/" + __version__})
-    with build_api_opener().open(request, timeout=10) as response:
-        raw = response.read(1024 * 1024 + 1)
-    if len(raw) > 1024 * 1024:
-        raise ValueError("更新信息过大。")
-    document = json.loads(raw)
+    try:
+        with build_api_opener().open(request, timeout=10) as response:
+            raw = response.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            raise ValueError("更新信息过大。")
+        document = json.loads(raw)
+    except urllib.error.HTTPError as exc:
+        if exc.code not in (403, 429):
+            raise
+        exc.close()
+        document = release_page_fallback()
     update = available_update(document)
     # Save only public release fields. A failed network check is not cached.
     release = {k: document.get(k) for k in ("tag_name", "draft", "prerelease", "assets")}

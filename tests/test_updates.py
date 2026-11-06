@@ -3,11 +3,23 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import urllib.error
 from unittest.mock import patch, Mock
 from codex_provider_launcher import updates
 
 
 class UpdateTests(unittest.TestCase):
+    def test_rate_limit_fallback_uses_only_this_repository_release(self):
+        root=f'https://github.com/{updates.REPOSITORY}/releases'
+        with tempfile.TemporaryDirectory() as d, patch.object(updates,'data_dir',return_value=Path(d)), patch.object(updates,'build_api_opener') as factory:
+            factory.return_value.open.side_effect=[urllib.error.HTTPError(updates.RELEASE_API,403,'limit',{},None),
+                urllib.error.HTTPError(root+'/latest',302,'found',{'Location':root+'/tag/v9.0.0'},None)]
+            result=updates.check_update(force=True)
+            self.assertEqual(result.version,'9.0.0')
+            self.assertEqual(result.download_url,root+'/tag/v9.0.0')
+            factory.return_value.open.side_effect=[urllib.error.HTTPError(root+'/latest',302,'found',{'Location':'https://other.invalid/tag/v9.0.0'},None)]
+            with self.assertRaises(ValueError):updates.release_page_fallback()
+
     def release(self):
         name=updates.asset_name()
         return {'tag_name':'v9.0.0','draft':False,'prerelease':False,'assets':[
