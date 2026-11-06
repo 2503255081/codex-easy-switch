@@ -15,7 +15,7 @@ from unittest.mock import patch
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.x509.oid import NameOID
+from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
 from codex_provider_launcher import catalog, network
 from codex_provider_launcher.profiles import new_profile
 
@@ -38,6 +38,8 @@ class HttpsTests(unittest.TestCase):
                 .issuer_name(name).public_key(key.public_key()).serial_number(x509.random_serial_number())
                 .not_valid_before(now-datetime.timedelta(days=1)).not_valid_after(now+datetime.timedelta(days=1))
                 .add_extension(x509.BasicConstraints(ca=False,path_length=None),critical=True)
+                .add_extension(x509.KeyUsage(True,False,True,False,False,False,False,False,False),critical=True)
+                .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]),critical=False)
                 .add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost")]),critical=False)
                 .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),critical=False)
                 .sign(ca_key,hashes.SHA256()))
