@@ -35,9 +35,14 @@ def windows_runtime() -> tuple[Path, Path]:
     digest = hashlib.sha256(bundled.read_bytes()).digest()
     root = Path(os.environ["LOCALAPPDATA"]) / "OpenAI" / "Codex" / "bin"
     for cli in root.glob("*/codex.exe"):
-        if hashlib.sha256(cli.read_bytes()).digest() == digest:
-            return app, cli
-    raise RuntimeError("未找到与桌面版匹配的 Codex CLI；请先正常启动一次官方 Codex。")
+        try:
+            if hashlib.sha256(cli.read_bytes()).digest() == digest:
+                return app, cli
+        except OSError:
+            continue  # An obsolete cache entry must not hide the bundled runtime.
+    # Store updates replace the app before Desktop populates its CLI cache. The
+    # executable in this very package is already the matching official runtime.
+    return app, bundled
 
 
 def ensure_windows_bridge() -> Path:

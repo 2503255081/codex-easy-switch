@@ -59,8 +59,9 @@ def candidate(original: bytes, profile: Profile | None, personal_model: str | No
         entry["base_url"] = profile.base_url
         entry["wire_api"] = "responses"
         entry["env_key"] = "CODEX_LAUNCHER_API_KEY"
-        if personal_auth:
-            entry["requires_openai_auth"] = True
+        # OpenAI auth takes precedence over env_key in current official clients.
+        # Never send a stored ChatGPT credential to a configured API endpoint.
+        entry["requires_openai_auth"] = False
         doc["model_providers"][PROVIDER] = entry
         if catalog is not None:
             doc["model_catalog_json"] = str(catalog)

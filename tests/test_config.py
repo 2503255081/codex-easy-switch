@@ -19,11 +19,11 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(doc["mcp_servers"]["test"]["command"], "example")
         self.assertEqual(doc["model_providers"]["launcher_custom"]["env_key"], "CODEX_LAUNCHER_API_KEY")
 
-    def test_personal_identity_is_only_enabled_when_available(self):
+    def test_api_auth_never_uses_personal_credentials_even_for_legacy_flag(self):
         without = tomlkit.parse(candidate(b'', self.profile).decode())
         with_login = tomlkit.parse(candidate(b'', self.profile, personal_auth=True).decode())
-        self.assertNotIn("requires_openai_auth", without["model_providers"]["launcher_custom"])
-        self.assertTrue(with_login["model_providers"]["launcher_custom"]["requires_openai_auth"])
+        self.assertFalse(without["model_providers"]["launcher_custom"]["requires_openai_auth"])
+        self.assertFalse(with_login["model_providers"]["launcher_custom"]["requires_openai_auth"])
         self.assertEqual(with_login["model_providers"]["launcher_custom"]["env_key"], "CODEX_LAUNCHER_API_KEY")
 
     def test_refuses_conflicting_configuration(self):

@@ -12,6 +12,13 @@ from codex_provider_launcher.profiles import new_profile
 
 @unittest.skipUnless(os.name == "nt", "desktop launch orchestration mock currently covers Windows")
 class LaunchTests(unittest.TestCase):
+    def test_automatic_model_does_not_pick_non_chat_endpoints(self):
+        candidates = [("omni-moderation-2024-09-26", {}), ("text-embedding-3-small", {}),
+                      ("gpt-audio", {}), ("gpt-chat", {})]
+        self.assertEqual(launch.default_model(candidates), "gpt-chat")
+        with self.assertRaises(ValueError):
+            launch.default_model(candidates[:3])
+
     def test_desktop_launch_failure_restores_config_and_chat_routes(self):
         from contextlib import ExitStack
         from test_history import fixture, routes
@@ -19,6 +26,10 @@ class LaunchTests(unittest.TestCase):
             root=Path(d);db=fixture(root);before=routes(db)
             config=root/'config.toml';original=b'model_provider="openai"\nmodel="personal-model"\n'
             config.write_bytes(original)
+            from test_desktop_state import fixture as view_fixture
+            view_path = root / '.codex-global-state.json'
+            original_view = json.dumps(view_fixture()).encode()
+            view_path.write_bytes(original_view)
             profile=new_profile('fixture','responses','https://example.com/v1','relay-model')
             stack.enter_context(patch.dict(os.environ, {'CODEX_HOME':str(root)}))
             for name,value in {'is_desktop_running':False,'windows_runtime':(root/'app',root/'cli'),
@@ -30,6 +41,8 @@ class LaunchTests(unittest.TestCase):
             with self.assertRaises(OSError):launch.launch(profile,'','','')
             self.assertEqual(config.read_bytes(),original)
             self.assertEqual(routes(db),before)
+            self.assertEqual(view_path.read_bytes(), original_view)
+            self.assertFalse((root / '.codex-easy-switch-personal-view.json').exists())
 
     def test_quota_compatibility_uses_api_key_without_openai_auth_and_preserves_login(self):
         from contextlib import ExitStack
@@ -52,7 +65,7 @@ class LaunchTests(unittest.TestCase):
             popen = stack.enter_context(patch.object(launch.subprocess, "Popen"))
             launch.launch(profile, "", "", "")
             doc = tomlkit.parse(config.read_text())
-            self.assertNotIn("requires_openai_auth", doc["model_providers"]["launcher_custom"])
+            self.assertFalse(doc["model_providers"]["launcher_custom"]["requires_openai_auth"])
             self.assertEqual(doc["model_providers"]["launcher_custom"]["env_key"], "CODEX_LAUNCHER_API_KEY")
             self.assertEqual(popen.call_args.kwargs["env"]["CODEX_LAUNCHER_API_KEY"], "fixture-key")
             self.assertEqual(auth.read_bytes(), original_auth)

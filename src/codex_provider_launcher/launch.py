@@ -19,6 +19,17 @@ from .platforms import ensure_windows_bridge, find_linux_desktop, find_mac_deskt
 from .probe import clean_env, validate
 from .profiles import CredentialStore, Profile, data_dir
 from .history import migrate_routes, restore_routes
+from .desktop_state import prepare_view
+
+
+def default_model(candidates: list[tuple[str, dict]]) -> str:
+    """Do not auto-select an embeddings/moderation/audio model for a chat."""
+    import re
+    available = [(name, item) for name, item in candidates if not re.search(
+        r"moderation|embedding|whisper|(^|[-_/])(tts|dall-e|sora|audio|realtime|transcribe|image)([-_/]|$)", name, re.I)]
+    if not available:
+        raise ValueError("未找到可用于对话的模型，请在设置中手动填写模型名称。")
+    return next((name for name, item in available if item.get("is_default") or item.get("isDefault")), available[0][0])
 
 
 def has_personal_auth(config_home: Path) -> bool:
@@ -91,7 +102,7 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
             if selected not in ids:
                 selected = "auto"
         if selected == "auto":
-            selected = next((name for name, item in candidates if item.get("is_default") or item.get("isDefault")), candidates[0][0])
+            selected = default_model(candidates)
         if selected not in ids:
             raise ValueError("所选中转站模型不可用，请在设置中测试连接并重新选择。")
         details = next(item for name, item in candidates if name == selected)
@@ -132,7 +143,7 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
             if profile.kind != "responses":
                 raise ValueError("Codex 原生模型目录仅适用于 Responses 服务。")
             catalog_path, catalog_models = fetch(profile, secret, cli)
-        personal_auth = bool(profile and not profile.quota_compatibility and has_personal_auth(config_home))
+        personal_auth = False  # API authentication must remain independent of ChatGPT.
         extras = tuple(dict.fromkeys(e for item in (catalog_models or []) for level in item.get("supported_reasoning_levels", []) if isinstance(level, dict) for e in [level.get("effort")] if isinstance(e, str))) if profile and profile.kind == "fixed_responses" else ()
         proposed = candidate(original or b"", active, personal_model.strip() if profile is None else None, catalog_path, isolate_catalog, personal_auth, deepseek=bool(profile and profile.kind == "deepseek"), extra_efforts=extras)
         if profile is None and state_path.exists():
@@ -179,6 +190,7 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
             commit(config_path, original, proposed, data_dir() / "backups", check)
             logger().info("configuration validated and saved; recovery record created")
             route_backup = None
+            view_change = None
             try:
                 if is_desktop_running():
                     raise RuntimeError("Codex Desktop 已启动，请退出后重试。")
@@ -189,12 +201,19 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
                     record["history_routes"] = route_backup.name
                     atomic_write(record_path, json.dumps(record).encode("utf-8"))
                     logger().info("paginated chat provider metadata migrated; recovery=%s", route_backup.name)
+                view_change = prepare_view(config_home, api=bool(profile), backups=data_dir() / "backups")
+                if view_change:
+                    logger().info("local desktop project view prepared mode=%s", "api" if profile else "personal")
                 child = subprocess.Popen(command, env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 logger().info("Codex launch process created pid=%s", getattr(child, "pid", "unknown"))
             except BaseException:
                 try:
-                    if route_backup:
-                        restore_routes(config_home, route_backup)
+                    try:
+                        if view_change:
+                            view_change.rollback()
+                    finally:
+                        if route_backup:
+                            restore_routes(config_home, route_backup)
                 finally:
                     # Restore only if nobody changed the candidate after commit.
                     if config_path.exists() and config_path.read_bytes() == proposed:

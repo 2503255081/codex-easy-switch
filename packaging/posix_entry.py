@@ -57,8 +57,8 @@ def gui_self_test(report):
                 raise RuntimeError("connection test button not available")
             if str(app.effort_entry.cget("state")) != "readonly":
                 raise RuntimeError("reasoning selector is not readonly")
-            if "额度耗尽兼容模式" not in str(app.quota_check.cget("text")) or app.quota_compatibility.get():
-                raise RuntimeError("quota compatibility option unavailable")
+            if "独立密钥" not in str(app.quota_note.cget("text")) or app.quota_compatibility.get():
+                raise RuntimeError("API authentication explanation unavailable")
             for mode, expected in (("doubao", ("minimal", "low", "medium", "high")),
                                    ("qwen", ("none", "low", "medium", "xhigh")),
                                    ("qianwen", ("none", "low", "medium", "xhigh"))):
