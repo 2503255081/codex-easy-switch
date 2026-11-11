@@ -31,6 +31,16 @@ class ConfigurationTests(unittest.TestCase):
             with self.subTest(raw=raw), self.assertRaises(ValueError):
                 candidate(raw, self.profile)
 
+    def test_personal_display_auth_only_allowed_through_loopback_relay(self):
+        with self.assertRaises(ValueError):
+            candidate(b"", self.profile, local_account_relay=True)
+        from dataclasses import replace
+        profile = replace(self.profile, base_url="http://127.0.0.1:12345/v1")
+        doc = tomlkit.parse(candidate(b"", profile, local_account_relay=True, fast=True).decode())
+        self.assertTrue(doc["model_providers"]["launcher_custom"]["requires_openai_auth"])
+        self.assertFalse(doc["model_providers"]["launcher_custom"]["supports_websockets"])
+        self.assertTrue(doc["features"]["fast_mode"])
+
     def test_backup_and_concurrent_edit(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)

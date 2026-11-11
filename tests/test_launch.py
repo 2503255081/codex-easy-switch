@@ -44,7 +44,7 @@ class LaunchTests(unittest.TestCase):
             self.assertEqual(view_path.read_bytes(), original_view)
             self.assertFalse((root / '.codex-easy-switch-personal-view.json').exists())
 
-    def test_quota_compatibility_uses_api_key_without_openai_auth_and_preserves_login(self):
+    def test_quota_display_uses_local_credential_boundary_and_preserves_login(self):
         from contextlib import ExitStack
         with tempfile.TemporaryDirectory() as d, ExitStack() as stack:
             root = Path(d)
@@ -62,13 +62,19 @@ class LaunchTests(unittest.TestCase):
                 stack.enter_context(patch.object(launch, name, return_value=value))
             stack.enter_context(patch("codex_provider_launcher.config.data_dir", return_value=root / "data"))
             stack.enter_context(patch.object(launch.CredentialStore, "get", return_value="fixture-key"))
+            view = stack.enter_context(patch.object(launch, "prepare_view", return_value=None))
             popen = stack.enter_context(patch.object(launch.subprocess, "Popen"))
-            launch.launch(profile, "", "", "")
+            _, relay = launch.launch(profile, "", "", "")
+            stack.callback(relay.__exit__, None, None, None)
             doc = tomlkit.parse(config.read_text())
-            self.assertFalse(doc["model_providers"]["launcher_custom"]["requires_openai_auth"])
+            entry = doc["model_providers"]["launcher_custom"]
+            self.assertTrue(entry["requires_openai_auth"])
+            self.assertTrue(entry["base_url"].startswith("http://127.0.0.1:"))
+            self.assertFalse(entry["supports_websockets"])
             self.assertEqual(doc["model_providers"]["launcher_custom"]["env_key"], "CODEX_LAUNCHER_API_KEY")
-            self.assertEqual(popen.call_args.kwargs["env"]["CODEX_LAUNCHER_API_KEY"], "fixture-key")
+            self.assertNotEqual(popen.call_args.kwargs["env"]["CODEX_LAUNCHER_API_KEY"], "fixture-key")
             self.assertEqual(auth.read_bytes(), original_auth)
+            self.assertFalse(view.call_args.kwargs["api"])
             launch.launch(None, "", "", "")
             self.assertEqual(tomlkit.parse(config.read_text())["projects"]["c:/fixture"]["trust_level"], "trusted")
             self.assertEqual(auth.read_bytes(), original_auth)

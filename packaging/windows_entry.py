@@ -50,7 +50,8 @@ def self_test(report):
             app.update_idletasks()
             assert app.test_button.cget("text") == "测试连接并获取模型"
             assert "独立密钥" in app.quota_note.cget("text")
-            assert not app.quota_compatibility.get()
+            assert app.quota_compatibility.get()
+            assert app.quota_check.cget("text") == "同时显示个人账号额度"
             app.mode.set("doubao")
             app.select_mode()
             assert app.model_choice.get().startswith("doubao-")

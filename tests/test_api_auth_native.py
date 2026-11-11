@@ -12,6 +12,8 @@ from pathlib import Path
 from codex_provider_launcher.config import candidate
 from codex_provider_launcher.probe import clean_env
 from codex_provider_launcher.profiles import new_profile
+from codex_provider_launcher.relay import AccountRelay
+from dataclasses import replace
 
 
 @unittest.skipUnless(os.environ.get("CODEX_TEST_CLI"), "requires a local official Codex CLI")
@@ -60,5 +62,26 @@ class NativeApiAuthTests(unittest.TestCase):
                     self.assertNotIn("personal-fixture-only", json.dumps(headers))
                     self.assertNotIn("refresh-fixture-only", json.dumps(headers))
                 self.assertEqual((home / "auth.json").read_bytes(), raw_auth)
+                seen.clear()
+                with AccountRelay(profile, "api-fixture-only", home) as relay:
+                    local = replace(profile, base_url=relay.url, model="gpt-6.1-sol")
+                    raw_config = candidate(b'', local, local_account_relay=True, fast=True)
+                    # service_tier is a root setting, not a provider-table setting.
+                    import tomlkit
+                    doc = tomlkit.parse(raw_config.decode())
+                    doc["service_tier"] = "fast"
+                    (home / "config.toml").write_text(tomlkit.dumps(doc), encoding="utf-8")
+                    env["CODEX_LAUNCHER_API_KEY"] = relay.master
+                    result = subprocess.run([os.environ["CODEX_TEST_CLI"], "exec", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "Reply hello"],
+                                            env=env, cwd=home, capture_output=True, timeout=40, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                    self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace")[-1500:])
+                    self.assertTrue(seen)
+                    for path, headers in seen:
+                        self.assertEqual(path, "/v1/responses")
+                        self.assertEqual(next(v for k, v in headers.items() if k.lower() == "authorization"), "Bearer api-fixture-only")
+                        self.assertNotIn("personal-fixture-only", json.dumps(headers))
+                    # Codex serializes the Fast UI/config choice as priority.
+                    self.assertEqual(relay.last_request["service_tier"], "priority")
+                    self.assertEqual((home / "auth.json").read_bytes(), raw_auth)
         finally:
             server.shutdown(); server.server_close()

@@ -7,6 +7,7 @@ import os
 import re
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import tomlkit
 from filelock import FileLock
@@ -17,7 +18,7 @@ PROVIDER = "launcher_custom"
 CONFLICTS = ("profile", "model_catalog_json", "openai_base_url", "forced_login_method")
 
 
-def candidate(original: bytes, profile: Profile | None, personal_model: str | None = None, catalog: Path | None = None, isolate_catalog: bool = False, personal_auth: bool = False, deepseek: bool = False, extra_efforts: tuple[str, ...] = ()) -> bytes:
+def candidate(original: bytes, profile: Profile | None, personal_model: str | None = None, catalog: Path | None = None, isolate_catalog: bool = False, personal_auth: bool = False, deepseek: bool = False, extra_efforts: tuple[str, ...] = (), local_account_relay: bool = False, fast: bool = False) -> bytes:
     """Generate a candidate. Unrecognized overrides are kept and stop switching."""
     doc = tomlkit.parse(original.decode("utf-8-sig"))
     if "model_catalog_json" in doc:
@@ -61,10 +62,21 @@ def candidate(original: bytes, profile: Profile | None, personal_model: str | No
         entry["env_key"] = "CODEX_LAUNCHER_API_KEY"
         # OpenAI auth takes precedence over env_key in current official clients.
         # Never send a stored ChatGPT credential to a configured API endpoint.
-        entry["requires_openai_auth"] = False
+        if local_account_relay:
+            address = urlsplit(profile.base_url)
+            if address.scheme != "http" or address.hostname != "127.0.0.1" or not address.port:
+                raise ValueError("个人额度显示只能使用启动器创建的本机转发地址。")
+            # The local AccountRelay replaces this credential with the API key
+            # before sending upstream. It has no personal inference fallback.
+            entry["requires_openai_auth"] = True
+            entry["supports_websockets"] = False
+        else:
+            entry["requires_openai_auth"] = False
         doc["model_providers"][PROVIDER] = entry
         if catalog is not None:
             doc["model_catalog_json"] = str(catalog)
+        if fast:
+            doc.setdefault("features", tomlkit.table())["fast_mode"] = True
     if deepseek or extra_efforts:
         # Desktop filters the model catalog against this separate effort allowlist.
         desktop = doc.setdefault("desktop", tomlkit.table())

@@ -20,6 +20,7 @@ from .probe import clean_env, validate
 from .profiles import CredentialStore, Profile, data_dir
 from .history import migrate_routes, restore_routes
 from .desktop_state import prepare_view
+from .relay import AccountRelay, RelayGroup
 
 
 def default_model(candidates: list[tuple[str, dict]]) -> str:
@@ -113,6 +114,7 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
         logger().info("relay model selected model=%s native_catalog=%s", selected, native)
         profile = dataclasses.replace(profile, model=selected, codex_catalog=native)
     adapter = None
+    account_relay = None
     try:
         active = profile
         if profile and profile.kind == "deepseek":
@@ -143,9 +145,22 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
             if profile.kind != "responses":
                 raise ValueError("Codex 原生模型目录仅适用于 Responses 服务。")
             catalog_path, catalog_models = fetch(profile, secret, cli)
-        personal_auth = False  # API authentication must remain independent of ChatGPT.
+        # Account display and Fast eligibility need the real saved login. A
+        # loopback credential boundary keeps it out of every remote API request.
+        personal_auth = bool(profile and profile.quota_compatibility and has_personal_auth(config_home))
+        if personal_auth:
+            account_relay = AccountRelay(active, secret, config_home)
+            account_relay.__enter__()
+            active = dataclasses.replace(active, base_url=account_relay.url)
+            secret = account_relay.master
+            logger().info("saved account display enabled through authenticated loopback relay")
+        fast = bool(catalog_models and any(
+            model.get("visibility") == "list" and (
+                "fast" in (model.get("additional_speed_tiers") or []) or any(
+                    isinstance(t, dict) and (t.get("id") in ("fast", "priority") or str(t.get("name", "")).lower() == "fast")
+                    for t in (model.get("service_tiers") or []))) for model in catalog_models))
         extras = tuple(dict.fromkeys(e for item in (catalog_models or []) for level in item.get("supported_reasoning_levels", []) if isinstance(level, dict) for e in [level.get("effort")] if isinstance(e, str))) if profile and profile.kind == "fixed_responses" else ()
-        proposed = candidate(original or b"", active, personal_model.strip() if profile is None else None, catalog_path, isolate_catalog, personal_auth, deepseek=bool(profile and profile.kind == "deepseek"), extra_efforts=extras)
+        proposed = candidate(original or b"", active, personal_model.strip() if profile is None else None, catalog_path, isolate_catalog, personal_auth, deepseek=bool(profile and profile.kind == "deepseek"), extra_efforts=extras, local_account_relay=personal_auth, fast=fast)
         if profile is None and state_path.exists():
             saved = json.loads(state_path.read_text(encoding="utf-8"))
             if "reasoning_present" in saved:
@@ -201,9 +216,9 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
                     record["history_routes"] = route_backup.name
                     atomic_write(record_path, json.dumps(record).encode("utf-8"))
                     logger().info("paginated chat provider metadata migrated; recovery=%s", route_backup.name)
-                view_change = prepare_view(config_home, api=bool(profile), backups=data_dir() / "backups")
+                view_change = prepare_view(config_home, api=bool(profile) and not personal_auth, backups=data_dir() / "backups")
                 if view_change:
-                    logger().info("local desktop project view prepared mode=%s", "api" if profile else "personal")
+                    logger().info("local desktop project view prepared mode=%s", "api" if profile and not personal_auth else "personal")
                 child = subprocess.Popen(command, env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 logger().info("Codex launch process created pid=%s", getattr(child, "pid", "unknown"))
             except BaseException:
@@ -222,8 +237,10 @@ def launch(profile: Profile | None, personal_model: str, cli_path: str, desktop_
                         else:
                             atomic_write(config_path, original)
                 raise
-        return child, adapter
+        return child, RelayGroup(adapter, account_relay) if account_relay else adapter
     except BaseException:
+        if account_relay:
+            account_relay.__exit__(None, None, None)
         if adapter:
             adapter.__exit__(None, None, None)
         raise
